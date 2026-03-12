@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+android/node_modules/
+
+# Build output
+dist/
+android/app/build/
+
+# Vite cache
+.vite/
+node_modules/.vite/
+
+# Environment / secrets
+.env
+.env.local
+.env.*.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Android build artifacts
+*.apk
+*.aab
+*.keystore
+*.jks
+android/.gradle/
+android/local.properties
+android/app/release/
+
+# Capacitor
+.capacitor/
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">奇阅魔方</string>
+    <string name="title_activity_main">奇阅魔方</string>
+    <string name="package_name">com.qiyue.mofang</string>
+    <string name="custom_url_scheme">com.qiyue.mofang</string>
+</resources>

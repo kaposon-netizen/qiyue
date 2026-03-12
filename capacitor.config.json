@@ -1,0 +1,11 @@
+{
+  "appId": "com.qiyue.mofang",
+  "appName": "奇阅魔方",
+  "webDir": "dist",
+  "server": {
+    "androidScheme": "https"
+  },
+  "android": {
+    "backgroundColor": "#faf7f2"
+  }
+}
