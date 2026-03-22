@@ -97,20 +97,26 @@ function lsLoad(key, def) {
 function lsSave(key, val) { try { localStorage.setItem(key, JSON.stringify(val)) } catch {} }
 
 // ─── IndexedDB ────────────────────────────────────────────────────────────────
-let _db = null
+let _dbPromise = null  // Promise cache: prevents concurrent indexedDB.open() calls
 async function getDB() {
-  if (_db) return _db
-  _db = await new Promise((res, rej) => {
+  if (_dbPromise) return _dbPromise
+  _dbPromise = new Promise((res, rej) => {
     const r = indexedDB.open('qiyue_v2', 2)
     r.onupgradeneeded = e => {
       const db = e.target.result
       if (!db.objectStoreNames.contains('rw'))    db.createObjectStore('rw',    { keyPath:'k' })
       if (!db.objectStoreNames.contains('books')) db.createObjectStore('books', { keyPath:'id' })
     }
-    r.onsuccess = e => res(e.target.result)
-    r.onerror   = rej
+    r.onsuccess = e => {
+      const db = e.target.result
+      db.onclose = () => { _dbPromise = null }  // invalidate on unexpected close
+      db.onerror = () => { _dbPromise = null }
+      res(db)
+    }
+    r.onerror = e => { _dbPromise = null; rej(e.target.error) }
+    r.onblocked = () => { _dbPromise = null; rej(new Error('IndexedDB blocked')) }
   })
-  return _db
+  return _dbPromise
 }
 async function dbGet(store, k)   { try { const db=await getDB(); return await new Promise(res=>{ const r=db.transaction(store,'readonly').objectStore(store).get(k); r.onsuccess=()=>res(r.result??null); r.onerror=()=>res(null) }) } catch { return null } }
 async function dbSet(store, val) { try { const db=await getDB(); await new Promise(res=>{ const tx=db.transaction(store,'readwrite'); tx.objectStore(store).put(val); tx.oncomplete=res }) } catch {} }
@@ -146,11 +152,14 @@ async function parseEpub(file) {
     if (!f) continue
     const html = await f.async('text')
     const text = htmlToText(html).trim()
-    if (text.length < 80) continue
+    const hasMedia = /<img|<svg|<image/i.test(html)
+    if (text.length < 20 && !hasMedia) continue
     chapters.push({ title: extractTitle(html) || `第${chapters.length+1}章`, text })
   }
   if (!chapters.length) throw new Error('未能提取章节')
-  return { id: hashStr(title+author+chapters.length), title, author, chapters, addedAt: Date.now() }
+  // Use title+author+chapterCount+firstChapterTextHash for stronger ID (reduces collision probability)
+  const contentFingerprint = title + '|' + author + '|' + chapters.length + '|' + (chapters[0]?.text?.slice(0,200)||'')
+  return { id: hashStr(contentFingerprint), title, author, chapters, addedAt: Date.now() }
 }
 function htmlToText(html) {
   html = html.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'')
@@ -163,7 +172,7 @@ function htmlToText(html) {
   html = html.replace(/<[^>]+>/g, '')
   // Decode entities
   html = html.replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&')
-             .replace(/&quot;/g,'"').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n)).replace(/&[a-z]+;/g,' ')
+             .replace(/&quot;/g,'"').replace(/&#(\d+);/g,(_,n)=>{ const code=+n; if(code<32&&code!==9&&code!==10)return ''; if(code>=0xD800&&code<=0xDFFF)return ''; if(code>0x10FFFF)return ''; return String.fromCodePoint(code) }).replace(/&[a-z]+;/g,' ')
   // Split, trim, filter empties
   const chunks = html.split('§§').map(s => s.replace(/[ \t]+/g,' ').trim()).filter(s => s.length > 0)
 
@@ -196,19 +205,39 @@ function extractTitle(html) { const m=html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-
 async function streamAI(apiKey, system, user, onChunk, provider='claude', model) {
   if (!apiKey) throw new Error('请先在设置中填写 ' + (PROVIDERS.find(p=>p.id===provider)?.name||'') + ' API Key')
   const prov = PROVIDERS.find(p=>p.id===provider) || PROVIDERS[0]
-  if (prov.directUrl) {
-    const msgs = system ? [{role:'system',content:system},{role:'user',content:user}] : [{role:'user',content:user}]
-    const resp = await fetch(prov.directUrl, { method:'POST', headers:{'content-type':'application/json','authorization':`Bearer ${apiKey}`}, body:JSON.stringify({model,messages:msgs,stream:true}) })
+
+  const checkResp = async resp => {
     if (!resp.ok) { let m=`HTTP ${resp.status}`; try{const e=await resp.json();m=e.error?.message||m}catch{}; throw new Error(m) }
-    const reader=resp.body.getReader(), dec=new TextDecoder(); let buf='',full=''
-    while(true){ const{done,value}=await reader.read(); if(done)break; buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop()||''; for(const line of lines){ if(!line.startsWith('data: '))continue; const d=line.slice(6).trim(); if(d==='[DONE]')continue; try{const p=JSON.parse(d);const t=p.choices?.[0]?.delta?.content;if(t){full+=t;onChunk?.(full)}}catch{} } }
+    return resp.body.getReader()
+  }
+
+  const readSSE = async (reader, isOAI) => {
+    const dec = new TextDecoder(); let buf='', full=''
+    try {
+      while(true) {
+        const{done,value}=await reader.read(); if(done)break
+        buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop()||''
+        for(const line of lines){
+          if(!line.startsWith('data:'))continue; const d=line.substring(5).trim(); if(d==='[DONE]')continue
+          try{
+            const p=JSON.parse(d)
+            const t=isOAI ? p.choices?.[0]?.delta?.content
+                          : (p.type==='content_block_delta'?p.delta?.text:null)
+            if(t){full+=t;onChunk?.(full)}
+          }catch{}
+        }
+      }
+    } finally { try{reader.releaseLock()}catch{} }  // always release — prevents stream lock
     return full
   }
-  const resp = await fetch(prov.endpoint, { method:'POST', headers:{'content-type':'application/json'}, body:JSON.stringify({apiKey,system,messages:[{role:'user',content:user}],model}) })
-  if (!resp.ok) { let m=`HTTP ${resp.status}`; try{const e=await resp.json();m=e.error?.message||m}catch{}; throw new Error(m) }
-  const reader=resp.body.getReader(), dec=new TextDecoder(); let buf='',full=''
-  while(true){ const{done,value}=await reader.read(); if(done)break; buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop()||''; for(const line of lines){ if(!line.startsWith('data: '))continue; const d=line.slice(6).trim(); if(d==='[DONE]')continue; try{const p=JSON.parse(d);if(p.type==='content_block_delta'&&p.delta?.text){full+=p.delta.text;onChunk?.(full)}}catch{} } }
-  return full
+
+  if (prov.directUrl) {
+    const msgs=system?[{role:'system',content:system},{role:'user',content:user}]:[{role:'user',content:user}]
+    const resp=await fetch(prov.directUrl,{method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${apiKey}`},body:JSON.stringify({model,messages:msgs,stream:true})})
+    return readSSE(await checkResp(resp), true)
+  }
+  const resp=await fetch(prov.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apiKey,system,messages:[{role:'user',content:user}],model})})
+  return readSSE(await checkResp(resp), false)
 }
 
 // ─── Tiny shared UI ───────────────────────────────────────────────────────────
@@ -337,6 +366,7 @@ export default function App() {
   const readerRef        = useRef(null)
   const pendingScrollRef = useRef(null)
   const selPanelRef      = useRef(null)
+  const streamThrottle   = useRef(null)  // throttle streaming UI updates to ~100ms
   // Sync selMode to a ref so selectionchange handler always sees current value
   const selModeRef       = useRef('')
   selModeRef.current     = selMode
@@ -348,7 +378,9 @@ export default function App() {
   const chapter      = book?.chapters[chIdx]
   const cachedRW     = style && cache[chIdx]?.[style.id]
   const isRewriting  = viewMode === 'rewriting'
-  const displayText  = isRewriting ? streamText : (viewMode==='rewritten'&&cachedRW ? cachedRW : chapter?.text||'')
+  // During rewriting, displayText stays as the ORIGINAL text for TTS/wordcount purposes.
+  // The streaming output is shown separately via streamText.
+  const displayText  = viewMode==='rewritten' && cachedRW ? cachedRW : (chapter?.text||'')
   const wordCount    = displayText.replace(/\s/g,'').length
   const readTime     = Math.max(1, Math.ceil(wordCount/400))
   const totalCh      = book?.chapters.length || 0
@@ -369,7 +401,7 @@ export default function App() {
   // ── Load library ──────────────────────────────────────────────────────────────
   useEffect(() => {
     dbAll('books').then(rows =>
-      setLibrary(rows.map(({id,title,author,addedAt})=>({id,title,author,addedAt})).sort((a,b)=>b.addedAt-a.addedAt))
+      setLibrary(rows.map(r=>({id:r.id,title:r.title,author:r.author,addedAt:r.addedAt,totalCh:r.chapters?.length||0})).sort((a,b)=>b.addedAt-a.addedAt))
     )
   }, [])
 
@@ -465,6 +497,15 @@ export default function App() {
     setSelAiReply('')
   }, [])
 
+  // ── Close selection panel when reader scrolls (prevents "ghost" panel) ────────
+  useEffect(() => {
+    const reader = readerRef.current
+    if (!reader) return
+    const onScroll = () => { if (selPanel) closeSelPanel() }
+    reader.addEventListener('scroll', onScroll, { passive: true })
+    return () => reader.removeEventListener('scroll', onScroll)
+  }, [selPanel, closeSelPanel])
+
   // ── Notes helpers ─────────────────────────────────────────────────────────────
   const saveNotes = useCallback(arr => {
     setNotes(arr)
@@ -514,7 +555,10 @@ export default function App() {
       const list = sents.length ? sents : [trimmed]
       list.forEach(s => { chunks.push(s.trim()); paraMap.push(nonEmptyIdx) })
     })
-    return chunks.length > 0 ? { chunks, paraMap } : { chunks:[text.trim()], paraMap:[0] }
+    const fallback = text.trim()
+    if (chunks.length > 0) return { chunks, paraMap }
+    // Guard: if text is all whitespace, return a dummy non-empty chunk so TTS doesn't speak ''
+    return fallback ? { chunks:[fallback], paraMap:[0] } : { chunks:['　'], paraMap:[0] }
   }
 
   // ── Find first non-empty paragraph visible in reader viewport ─────────────────
@@ -539,7 +583,8 @@ export default function App() {
     if (paraIdx == null) return
     const el = readerRef.current
     if (!el) return
-    const target = el.querySelector(`[data-para="${paraIdx}"]`)
+    if (typeof paraIdx !== 'number' || !Number.isFinite(paraIdx)) return
+    const target = el.querySelector(`[data-para="${Math.floor(paraIdx)}"]`)
     if (!target) return
     const elRect = el.getBoundingClientRect()
     const tRect  = target.getBoundingClientRect()
@@ -601,7 +646,19 @@ export default function App() {
     if (!s.stopped && !s.paused) { setTtsPlaying(false); setTtsPaused(false); setTtsProgress(-1); ttsRef.current = null }
   }, [ttsSpeak, ttsRate])
 
-  const ttsToggle = () => ttsPlaying ? ttsPause() : ttsPaused ? ttsResume() : ttsSpeak()
+  // Guard against double-tap race: if a TTS state-change is already in flight, ignore
+  const ttsBusy = useRef(false)
+  const ttsToggle = useCallback(async () => {
+    if (ttsBusy.current) return
+    ttsBusy.current = true
+    try {
+      if (ttsPlaying)      await ttsPause()
+      else if (ttsPaused)  await ttsResume()
+      else                 await ttsSpeak()
+    } finally {
+      ttsBusy.current = false
+    }
+  }, [ttsPlaying, ttsPaused, ttsPause, ttsResume, ttsSpeak])
 
   // ── Immersive tap handler ─────────────────────────────────────────────────────
   const handleReaderTap = useCallback((e) => {
@@ -622,15 +679,20 @@ export default function App() {
 
   // ── Book management ───────────────────────────────────────────────────────────
   // Load all cached rewrites for a chapter from IndexedDB
+  const cacheLoadToken = useRef(0)  // increment to cancel stale IDB reads
+
   const loadChapterCache = useCallback(async (bookId, idx) => {
+    const token = ++cacheLoadToken.current  // snapshot current token
     const loaded = {}
     for (const s of STYLES) {
+      if (cacheLoadToken.current !== token) return {}  // cancelled — newer load started
       const row = await dbGet('rw', `${bookId}_${idx}_${s.id}`)
       if (row?.text) {
         if (!loaded[idx]) loaded[idx] = {}
         loaded[idx][s.id] = row.text
       }
     }
+    if (cacheLoadToken.current !== token) return {}  // cancelled before write
     if (Object.keys(loaded).length > 0) setCache(p => ({...p, ...loaded}))
     return loaded
   }, [])
@@ -640,7 +702,8 @@ export default function App() {
     if (!b) { alert('书籍数据丢失，请重新上传'); return }
 
     const saved   = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
-    const savedCh = saved.bookId === b.id ? (saved.chIdx||0) : 0
+    const rawCh = saved.bookId === b.id ? saved.chIdx : 0
+    const savedCh = (Number.isInteger(rawCh) && rawCh >= 0 && rawCh < (b.chapters?.length||1)) ? rawCh : 0
 
     setBook(b); setChIdx(savedCh); setStreamText(''); setSidebarTab('chapters')
     setCache({})
@@ -666,6 +729,7 @@ export default function App() {
 
   const handleFile = useCallback(async file => {
     if (!file?.name.match(/\.epub$/i)) { alert('请上传 .epub 文件'); return }
+    if (file.size > 50 * 1024 * 1024) { setToast('文件过大，上限 50MB'); setTimeout(()=>setToast(''),3000); return }
     setToast('解析中…')
     try {
       const meta = await parseEpub(file)
@@ -686,23 +750,33 @@ export default function App() {
   }, [book])
 
   const goChapter = useCallback(async idx => {
-    setChIdx(idx); setStreamText('')
-    lsSave(READ_POS_KEY, { bookId: book?.id, chIdx: idx, scrollPct: 0 })
+    // Guard: reject NaN, non-integer, and out-of-range chapter index
+    const safeIdx = Math.floor(Number(idx))
+    if (!Number.isFinite(safeIdx) || safeIdx < 0 || (book && safeIdx >= book.chapters.length)) return
+    const idx_ = safeIdx  // use sanitized value
+    setChIdx(idx_); setStreamText('')
+    lsSave(READ_POS_KEY, { bookId: book?.id, chIdx: idx_, scrollPct: 0 })
     if (isMob) setSidebarOpen(false)
 
     if (!book) return
 
+    const targetBookId = book.id  // snapshot before async gap
+
     // Load cached rewrites for this chapter
     const chCache = await loadChapterCache(book.id, idx)
 
+    // Guard: abort if user navigated away during IDB fetch
+    const currentPos = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
+    if (currentPos.chIdx !== idx || currentPos.bookId !== targetBookId) return
+
     // Restore rewrite state if one was saved for this chapter
     const rwState = JSON.parse(localStorage.getItem(RW_STATE_KEY)||'{}')
-    const rwKey   = `${book.id}_${idx}`
+    const rwKey   = `${targetBookId}_${idx}`
     const si      = rwState[rwKey]?.styleId
     const vm      = rwState[rwKey]?.viewMode || 'original'
     const s       = si ? STYLES.find(st => st.id === si) : null
     if (s && chCache[idx]?.[si]) { setStyle(s); setViewMode(vm) }
-    else { setViewMode('original') }
+    else { setStyle(null); setViewMode('original') }
   }, [book, isMob, loadChapterCache])
 
   // ── Rewrite ───────────────────────────────────────────────────────────────────
@@ -719,26 +793,62 @@ export default function App() {
     setShowStyleModal(false); setStyle(s)
     if (!curApiKey) { setShowSettings(true); return }
     const text = chapter?.text || ''; if (!text) return
+    // Snapshot mutable values before any await — prevents stale closure bugs
+    const capturedChIdx  = chIdx
+    const capturedBookId = book?.id
     setViewMode('rewriting'); setStreamText(''); setRewriteLoading(true)
     let finalText = '', chunks = []
     const CHUNK = 1800
     if (text.length > CHUNK) for (let i=0;i<text.length;i+=CHUNK) chunks.push(text.slice(i,Math.min(i+CHUNK,text.length)))
     try {
       if (!chunks.length) {
-        await streamAI(curApiKey, s.prompt, `改写以下内容：\n\n${text}`, chunk => { finalText=chunk; setStreamText(chunk) }, settings.provider, settings.model)
+        await streamAI(curApiKey, s.prompt, `改写以下内容：\n\n${text}`, chunk => {
+          finalText = chunk
+          if (!streamThrottle.current) {
+            const snap = finalText  // capture by value, not reference
+            streamThrottle.current = setTimeout(() => {
+              setStreamText(snap)
+              streamThrottle.current = null
+            }, 80)
+          }
+        }, settings.provider, settings.model)
       } else {
         for (let i=0; i<chunks.length; i++) {
           let co = ''
-          await streamAI(curApiKey, s.prompt, `第${i+1}段（共${chunks.length}段）：\n\n${chunks[i]}`, chunk => { co=chunk; setStreamText(finalText+chunk) }, settings.provider, settings.model)
+          await streamAI(curApiKey, s.prompt, `第${i+1}段（共${chunks.length}段）：\n\n${chunks[i]}`, chunk => {
+            co = chunk
+            if (!streamThrottle.current) {
+              const snapFinal = finalText  // capture outer accumulator
+              const snapCo = co            // capture current segment text
+              streamThrottle.current = setTimeout(() => {
+                setStreamText(snapFinal + snapCo)
+                streamThrottle.current = null
+              }, 80)
+            }
+          }, settings.provider, settings.model)
           finalText += co
         }
       }
-      const key = `${book?.id}_${chIdx}_${s.id}`
+      const key = `${capturedBookId}_${capturedChIdx}_${s.id}`
       await dbSet('rw', { k:key, text:finalText })
-      setCache(p => ({...p, [chIdx]: {...(p[chIdx]||{}), [s.id]: finalText}}))
-      setViewMode('rewritten')
-      if (book?.id) saveRwState(book.id, chIdx, s.id, 'rewritten')
-    } catch(e) { setToast('改写出错: '+(e?.message||e)); setTimeout(()=>setToast(''),3000); setViewMode('original') }
+      // Clear any pending throttle and do a final update
+      if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+      setStreamText(finalText)
+      setCache(p => ({...p, [capturedChIdx]: {...(p[capturedChIdx]||{}), [s.id]: finalText}}))
+      // Only update viewMode if user is still on the same chapter we rewrote
+      setChIdx(cur => {
+        if (cur === capturedChIdx) {
+          setViewMode('rewritten')
+          if (capturedBookId) saveRwState(capturedBookId, capturedChIdx, s.id, 'rewritten')
+        }
+        return cur  // don't actually change chIdx
+      })
+    } catch(e) {
+      if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+      setToast('改写出错: '+(e?.message||e)); setTimeout(()=>setToast(''),3000)
+      // Only reset viewMode if still on same chapter
+      setChIdx(cur => { if (cur === capturedChIdx) setViewMode('original'); return cur })
+    }
     setRewriteLoading(false)
   }, [curApiKey, chapter, chIdx, book, settings, saveRwState])
 
@@ -750,12 +860,17 @@ export default function App() {
     dbGet('rw', key).then(row => { if (row?.text) setCache(p => ({...p,[chIdx]:{...(p[chIdx]||{}),[style.id]:row.text}})) })
   }, [chIdx, book, style])
 
+  const loadSamplesToken = useRef(0)
   const loadSamples = useCallback(async () => {
     if (!curApiKey || !chapter?.text) return
+    const token = ++loadSamplesToken.current  // cancel previous in-flight loadSamples
     setStyleSamples({})
     const sample = chapter.text.slice(0, 400)
     for (const st of STYLES) {
-      try { await streamAI(curApiKey, st.prompt, `改写以下样本：\n\n${sample}`, chunk => setStyleSamples(p=>({...p,[st.id]:chunk})), settings.provider, settings.model) }
+      if (loadSamplesToken.current !== token) return  // modal closed, abort
+      try { await streamAI(curApiKey, st.prompt, `改写以下样本：\n\n${sample}`, chunk => {
+        if (loadSamplesToken.current === token) setStyleSamples(p=>({...p,[st.id]:chunk}))
+      }, settings.provider, settings.model) }
       catch {}
     }
   }, [curApiKey, chapter, settings])
@@ -765,6 +880,17 @@ export default function App() {
   // ── Render reader paragraphs with note highlights + TTS highlight ──────────────
   const ttsCurrentPara = (ttsPlaying || ttsPaused) && ttsRef.current?.paraMap && ttsProgress >= 0
     ? ttsRef.current.paraMap[ttsProgress] : -1
+
+  // Pre-build paragraph→note lookup Map: O(N×L) once, O(1) per paragraph in renderParas
+  const noteIndex = useMemo(() => {
+    const map = new Map()
+    for (const n of notes) {
+      if (n.bookId !== book?.id || n.chIdx !== chIdx || !n.paraText) continue
+      const pt = n.paraText.split('\n').map(l=>l.trim()).find(l=>l.length>1) || n.paraText.trim()
+      if (pt.length > 1) map.set(pt, n)
+    }
+    return map
+  }, [notes, book?.id, chIdx])
 
   const renderParas = () => {
     let paraIdx = -1
@@ -776,11 +902,11 @@ export default function App() {
       const curPara = paraIdx
       const isSpeaking = curPara === ttsCurrentPara
 
-      const mn = notes.find(n => {
-        if (n.bookId!==book?.id || n.chIdx!==chIdx || !n.paraText) return false
-        const pt = n.paraText.split('\n').map(l=>l.trim()).find(l=>l.length>1) || n.paraText.trim()
-        return pt.length > 1 && trimmed.includes(pt)
-      })
+      // O(1) map lookup via noteIndex useMemo — was O(N×L) per paragraph
+      let mn = null
+      for (const [pt, note] of noteIndex) {
+        if (trimmed.includes(pt)) { mn = note; break }
+      }
 
       // Book-style: small bottom margin, first-line indent
       const baseStyle = {
@@ -799,8 +925,26 @@ export default function App() {
 
       if (!mn) return <p key={i} data-para={curPara} style={baseStyle}>{trimmed}</p>
 
-      const pt = mn.paraText.split('\n').map(l=>l.trim()).find(l=>l.length>1) || mn.paraText.trim()
-      const ht = pt, hi = trimmed.indexOf(ht)
+      // Bug 5 fix: support cross-paragraph selections by checking all lines of paraText
+      const paraLines = mn.paraText.split('\n').map(l=>l.trim()).filter(l=>l.length>4)
+      // Find which line of the note matches this paragraph
+      const matchLine = paraLines.find(line => trimmed.includes(line)) ||
+                        paraLines.find(line => line.includes(trimmed.slice(0, Math.min(trimmed.length, 30))))
+      if (!matchLine) return <p key={i} data-para={curPara} style={baseStyle}>{trimmed}</p>
+
+      const ht = matchLine, hi = trimmed.indexOf(ht)
+      // If the whole paragraph is part of the selection, highlight the whole thing
+      const isFullPara = paraLines.some(line => line === trimmed || line.includes(trimmed.slice(0,40)))
+      if (isFullPara && hi === -1) {
+        return (
+          <p key={i} data-para={curPara} style={baseStyle}>
+            <mark style={{background:t.accent+'44',borderRadius:3,padding:'1px 0',borderBottom:`2px solid ${t.accent}`,color:'inherit'}}>
+              {trimmed}
+              {mn.thought && <span style={{fontSize:10,color:t.accent,marginLeft:3,opacity:.8}}><Ic name='thought' size={9} color={t.accent}/></span>}
+            </mark>
+          </p>
+        )
+      }
       if (hi === -1) return <p key={i} data-para={curPara} style={baseStyle}>{trimmed}</p>
       return (
         <p key={i} data-para={curPara} style={baseStyle}>
@@ -1083,7 +1227,11 @@ export default function App() {
                   textAlign:'justify',textJustify:'inter-ideograph',
                   WebkitFontSmoothing:'antialiased',
                 }}>
-                  {renderParas()}
+                  {isRewriting
+                    // During streaming: plain pre-wrap text, no DOM churn
+                    ? <div style={{whiteSpace:'pre-wrap'}}>{streamText}</div>
+                    : renderParas()
+                  }
                   {isRewriting && <span style={{display:'inline-block',width:2,height:'1em',background:t.accent,marginLeft:2,verticalAlign:'text-bottom',animation:'blink .9s step-end infinite'}}/>}
                 </div>
               </div>
