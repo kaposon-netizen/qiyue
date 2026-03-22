@@ -64,7 +64,7 @@ const PROVIDERS = [
     models:[ {id:'gemini-2.5-pro',name:'2.5 Pro (最强)'}, {id:'gemini-2.0-flash',name:'2.0 Flash (推荐)'} ] },
 ]
 
-const STORAGE_KEY = 'qiyue_settings_v3'
+const APP_VERSION = '2.4.0'  // YYYY-MM-DD → bump on every release
 const READ_POS_KEY = 'qiyue_read_pos'  // legacy — kept for migration only
 
 // ── Per-book reading position helpers ─────────────────────────────────────────
@@ -1822,6 +1822,7 @@ export default function App() {
                     <div>作者：Simon Y &nbsp;·&nbsp; MIT License 开源免费</div>
                     <div>GitHub：<a href="https://github.com/kaposon-netizen/qiyue" target="_blank" style={{color:t.accent,textDecoration:'none'}}>github.com/kaposon-netizen/qiyue</a></div>
                     <div style={{fontSize:11,color:t.muted,marginTop:4}}>有问题或建议，欢迎在 GitHub 提 Issue</div>
+                    <div style={{fontSize:11,color:t.muted,marginTop:2,opacity:.6}}>v{APP_VERSION}</div>
                   </div>
                 </div>
               </div>
