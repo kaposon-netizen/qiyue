@@ -65,7 +65,30 @@ const PROVIDERS = [
 ]
 
 const STORAGE_KEY = 'qiyue_settings_v3'
-const READ_POS_KEY = 'qiyue_read_pos'
+const READ_POS_KEY = 'qiyue_read_pos'  // legacy — kept for migration only
+
+// ── Per-book reading position helpers ─────────────────────────────────────────
+function getPosKey(bookId) { return `qiyue_pos_${bookId}` }
+
+function saveReadPos(bookId, chIdx, scrollPct) {
+  if (!bookId) return
+  try {
+    localStorage.setItem(getPosKey(bookId), JSON.stringify({ chIdx, scrollPct }))
+  } catch {}
+}
+
+function loadReadPos(bookId) {
+  if (!bookId) return { chIdx: 0, scrollPct: 0 }
+  try {
+    // Try new per-book key first, fall back to legacy single key
+    const v = localStorage.getItem(getPosKey(bookId))
+    if (v) return JSON.parse(v)
+    // Migration: check legacy key
+    const legacy = JSON.parse(localStorage.getItem(READ_POS_KEY) || '{}')
+    if (legacy.bookId === bookId) return { chIdx: legacy.chIdx || 0, scrollPct: legacy.scrollPct || 0 }
+  } catch {}
+  return { chIdx: 0, scrollPct: 0 }
+}
 const NOTES_KEY   = 'qiyue_notes_v1'
 const RW_STATE_KEY = 'qiyue_rw_state'  // persists viewMode + styleId per book+chapter
 
@@ -706,8 +729,8 @@ export default function App() {
     let b = meta.chapters ? meta : await dbGet('books', meta.id)
     if (!b) { alert('书籍数据丢失，请重新上传'); return }
 
-    const saved   = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
-    const rawCh = saved.bookId === b.id ? saved.chIdx : 0
+    const saved   = loadReadPos(b.id)
+    const rawCh   = saved.chIdx
     const savedCh = (Number.isInteger(rawCh) && rawCh >= 0 && rawCh < (b.chapters?.length||1)) ? rawCh : 0
 
     setBook(b); setChIdx(savedCh); setStreamText(''); setSidebarTab('chapters')
@@ -726,7 +749,7 @@ export default function App() {
     if (s && chCache[savedCh]?.[si]) { setStyle(s); setViewMode(vm) }
     else { setStyle(null); setViewMode('original') }
 
-    if (saved.bookId === b.id) {
+    if (savedCh > 0 || saved.scrollPct > 0) {
       setTimeout(() => { pendingScrollRef.current = saved.scrollPct||0 }, 50)
     }
     setScreen('reading')
@@ -751,6 +774,13 @@ export default function App() {
     if (!confirm('确定删除这本书？')) return
     await dbDel('books', bookId)
     setLibrary(prev => prev.filter(b => b.id !== bookId))
+    // Clean up all per-book localStorage state
+    try {
+      localStorage.removeItem(getPosKey(bookId))
+      const rwState = JSON.parse(localStorage.getItem(RW_STATE_KEY)||'{}')
+      Object.keys(rwState).forEach(k => { if (k.startsWith(bookId + '_')) delete rwState[k] })
+      localStorage.setItem(RW_STATE_KEY, JSON.stringify(rwState))
+    } catch {}
     if (book?.id === bookId) { setBook(null); setChIdx(0); setViewMode('original'); setCache({}) }
   }, [book])
 
@@ -760,7 +790,7 @@ export default function App() {
     if (!Number.isFinite(safeIdx) || safeIdx < 0 || (book && safeIdx >= book.chapters.length)) return
     const idx_ = safeIdx  // use sanitized value
     setChIdx(idx_); setStreamText('')
-    lsSave(READ_POS_KEY, { bookId: book?.id, chIdx: idx_, scrollPct: 0 })
+    saveReadPos(book?.id, idx_, 0)
     if (isMob) setSidebarOpen(false)
 
     if (!book) return
@@ -771,8 +801,8 @@ export default function App() {
     const chCache = await loadChapterCache(book.id, idx_)
 
     // Guard: abort if user navigated away during IDB fetch
-    const currentPos = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
-    if (currentPos.chIdx !== idx_ || currentPos.bookId !== targetBookId) return
+    const currentPos = loadReadPos(targetBookId)
+    if (currentPos.chIdx !== idx_) return
 
     // Restore rewrite state if one was saved for this chapter
     const rwState = JSON.parse(localStorage.getItem(RW_STATE_KEY)||'{}')
@@ -1195,7 +1225,7 @@ export default function App() {
             if (book && readerRef.current) {
               const el = readerRef.current
               const pct = el.scrollHeight > el.clientHeight ? el.scrollTop/(el.scrollHeight-el.clientHeight) : 0
-              lsSave(READ_POS_KEY, { bookId:book.id, chIdx, scrollPct:pct })
+              saveReadPos(book.id, chIdx, pct)
             }
           }}
           style={{
@@ -1211,7 +1241,6 @@ export default function App() {
                 onLoadBook={loadBook} onUpload={()=>fileInputRef.current?.click()}
                 onSettings={()=>setShowSettings(true)}
                 onDeleteBook={deleteBook}
-                readPos={JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')}
                 chIdx={chIdx}
               />
             : (
@@ -1773,14 +1802,22 @@ function coverPalette(id) {
 
 // ─── Home Screen ──────────────────────────────────────────────────────────────
 function HomeScreen({ t, library, notes, book, homeTab, setHomeTab,
-  onLoadBook, onUpload, onSettings, onDeleteBook, readPos, chIdx }) {
+  onLoadBook, onUpload, onSettings, onDeleteBook, chIdx }) {
   const w = useWidth()
   const isMob = w < 768
   const pal = book ? coverPalette(book.id) : null
   const totalCh = book?.chapters?.length || 0
-  const pct = totalCh > 1 ? Math.round((readPos.chIdx||0)/(totalCh-1)*100) : 0
+  const savedPos = book ? loadReadPos(book.id) : { chIdx:0, scrollPct:0 }
+  const pct = totalCh > 1 ? Math.round((savedPos.chIdx||0)/(totalCh-1)*100) : 0
 
   const F = FONTS.lora
+
+  // Pre-read all book positions once — avoids N localStorage reads per render
+  const posMap = useMemo(() => {
+    const m = new Map()
+    library.forEach(b => m.set(b.id, loadReadPos(b.id)))
+    return m
+  }, [library])
 
   return (
     <div style={{
@@ -1849,7 +1886,7 @@ function HomeScreen({ t, library, notes, book, homeTab, setHomeTab,
                     width:`${pct}%`,borderRadius:2,transition:'width .3s'}}/>
                 </div>
                 <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:t.muted}}>
-                  <span>第 {(readPos.chIdx||0)+1} 章 / 共 {totalCh} 章</span>
+                  <span>第 {(savedPos.chIdx||0)+1} 章 / 共 {totalCh} 章</span>
                   <span style={{color:t.accent,fontWeight:600}}>{pct}%</span>
                 </div>
               </div>
@@ -1900,9 +1937,9 @@ function HomeScreen({ t, library, notes, book, homeTab, setHomeTab,
             {/* Book grid */}
             {library.map(b => {
               const p = coverPalette(b.id)
-              const pos = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
-              const bPct = b.id===book?.id ? pct :
-                (pos.bookId===b.id && b.totalCh>1 ? Math.round((pos.chIdx||0)/(b.totalCh-1)*100) : 0)
+              const pos = posMap.get(b.id) || { chIdx:0, scrollPct:0 }
+              const bTotalCh = b.chapters?.length || b.totalCh || 1
+              const bPct = bTotalCh > 1 ? Math.round((pos.chIdx||0) / (bTotalCh-1) * 100) : 0
               return (
                 <div key={b.id} style={{display:'flex',flexDirection:'column',gap:9}}>
                   <div onClick={()=>onLoadBook(b)} style={{
