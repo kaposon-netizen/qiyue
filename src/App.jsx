@@ -353,7 +353,8 @@ export default function App() {
   const [cache,          setCache]          = useState({})
   const [sidebarOpen,    setSidebarOpen]    = useState(!isMob)
   const [sidebarTab,     setSidebarTab]     = useState('chapters')
-  const [rewriteLoading, setRewriteLoading] = useState(false)
+  const [rewriteLoading,  setRewriteLoading]  = useState(false)
+  const [rewriteProgress, setRewriteProgress] = useState(null) // {done,total} or null
   const [streamText,     setStreamText]     = useState('')
   const [showSettings,   setShowSettings]   = useState(false)
   const [showStyleModal, setShowStyleModal] = useState(false)
@@ -572,6 +573,20 @@ export default function App() {
   }, [])
 
   useEffect(() => { ttsStop() }, [chIdx, book])
+
+  // ── Screen-off resilience: save current stream progress when page hides ──────
+  useEffect(() => {
+    const onHide = () => {
+      if (!rewriteAbort.current) return  // no rewrite in flight
+      // streamText holds whatever has been output so far
+      // The underlying fetch will be killed by Android; we can't prevent it,
+      // but we don't need to — partial saves happen after each segment in doRewrite.
+      // Just clear the throttle to prevent a stale setState on resume.
+      if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+    }
+    document.addEventListener('visibilitychange', onHide)
+    return () => document.removeEventListener('visibilitychange', onHide)
+  }, [])
 
   // ── splitChunks: paraIdx counts ONLY non-empty paragraphs (same as renderParas) ──
   const splitChunks = text => {
@@ -838,86 +853,162 @@ export default function App() {
     } catch {}
   }, [])
 
+  const stopRewrite = useCallback(() => {
+    if (!rewriteAbort.current) return
+    rewriteAbort.current.abort()
+    rewriteAbort.current = null
+    if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+    setRewriteLoading(false)
+    setRewriteProgress(null)
+    // Don't reset viewMode — keep whatever was already shown (partial is fine)
+  }, [])
+
   const doRewrite = useCallback(async styleId => {
     const s = STYLES.find(s=>s.id===styleId); if (!s) return
     setShowStyleModal(false); setStyle(s)
     if (!curApiKey) { setShowSettings(true); return }
     const text = chapter?.text || ''; if (!text) return
-    // Snapshot mutable values before any await — prevents stale closure bugs
     const capturedChIdx  = chIdx
     const capturedBookId = book?.id
-    // Cancel any previous rewrite that might still be running
     if (rewriteAbort.current) { rewriteAbort.current.abort(); rewriteAbort.current = null }
     const abort = new AbortController()
     rewriteAbort.current = abort
 
-    setViewMode('rewriting'); setStreamText(''); setRewriteLoading(true)
-    let finalText = '', chunks = []
+    setViewMode('rewriting'); setStreamText(''); setRewriteLoading(true); setRewriteProgress(null)
+
+    // ── Split into paragraph-boundary chunks ──────────────────────────────────
+    let chunks = []
     const CHUNK = 1800
     if (text.length > CHUNK) {
-      // Split on paragraph boundaries — never cut mid-sentence
       const paras = text.split('\n').filter(p => p.trim())
       let cur = ''
       for (const p of paras) {
-        if (cur && (cur.length + p.length + 1) > CHUNK) { chunks.push(cur.trim()); cur = p }
+        if (cur && cur.length + p.length + 1 > CHUNK) { chunks.push(cur.trim()); cur = p }
         else cur = cur ? cur + '\n' + p : p
       }
       if (cur.trim()) chunks.push(cur.trim())
     }
+    const isMulti = chunks.length > 0
+    if (isMulti) setRewriteProgress({ done: 0, total: chunks.length })
+
+    // ── IDB partial-result key ─────────────────────────────────────────────────
+    const idbKey    = `${capturedBookId}_${capturedChIdx}_${s.id}`
+    const partialKey = idbKey + '_partial'
+
+    const flushToScreen = (text) => {
+      if (streamThrottle.current) return
+      const snap = text
+      streamThrottle.current = setTimeout(() => {
+        setStreamText(snap); streamThrottle.current = null
+      }, 80)
+    }
+
+    let finalText = ''
     try {
-      if (!chunks.length) {
+      if (!isMulti) {
+        // ── Single-chunk (short chapter) ───────────────────────────────────────
         await streamAI(curApiKey, s.prompt, `改写以下内容：\n\n${text}`, chunk => {
-          finalText = chunk
-          if (!streamThrottle.current) {
-            const snap = finalText  // capture by value, not reference
-            streamThrottle.current = setTimeout(() => {
-              setStreamText(snap)
-              streamThrottle.current = null
-            }, 80)
-          }
+          finalText = chunk; flushToScreen(chunk)
         }, settings.provider, settings.model, abort.signal)
+
       } else {
-        for (let i=0; i<chunks.length; i++) {
+        // ── Multi-chunk: save partial after each segment ───────────────────────
+        // Resume from saved partial if available (handles reconnect after screen-off)
+        const savedPartial = await dbGet('rw', partialKey)
+        let startFrom = 0
+        if (savedPartial?.text && savedPartial?.done > 0 && savedPartial?.done < chunks.length) {
+          finalText = savedPartial.text
+          startFrom = savedPartial.done
+          flushToScreen(finalText)
+          setRewriteProgress({ done: startFrom, total: chunks.length })
+        }
+
+        for (let i = startFrom; i < chunks.length; i++) {
+          if (abort.signal.aborted) break
           let co = ''
-          await streamAI(curApiKey, s.prompt, `这是第${i+1}段，共${chunks.length}段，请保持风格和语言连贯，输出必须用中文：\n\n${chunks[i]}`, chunk => {
-            co = chunk
-            if (!streamThrottle.current) {
-              const snapFinal = finalText  // capture outer accumulator
-              const snapCo = co            // capture current segment text
-              streamThrottle.current = setTimeout(() => {
-                setStreamText(snapFinal + snapCo)
-                streamThrottle.current = null
-              }, 80)
-            }
-          }, settings.provider, settings.model, abort.signal)
+          try {
+            await streamAI(curApiKey, s.prompt,
+              `这是第${i+1}段，共${chunks.length}段，请保持风格和语言连贯，输出必须用中文：\n\n${chunks[i]}`,
+              chunk => { co = chunk; flushToScreen(finalText + chunk) },
+              settings.provider, settings.model, abort.signal)
+          } catch(segErr) {
+            if (segErr?.name === 'AbortError') throw segErr  // propagate user-abort
+            // Network/API error on this segment: save partial and surface a retry toast
+            await dbSet('rw', { k: partialKey, text: finalText, done: i, total: chunks.length })
+            showToast(`第${i+1}段失败，已保存前${i}段 — 点AI按钮重新开始将从此处续写`, 5000)
+            break  // stop, keep what we have
+          }
           finalText += co
+          setRewriteProgress({ done: i + 1, total: chunks.length })
+          // Save partial progress to IDB after each segment
+          await dbSet('rw', { k: partialKey, text: finalText, done: i + 1, total: chunks.length })
         }
       }
-      const key = `${capturedBookId}_${capturedChIdx}_${s.id}`
-      await dbSet('rw', { k:key, text:finalText })
-      // Clear abort ref and any pending throttle
+
+      // ── Finalise ──────────────────────────────────────────────────────────────
+      if (abort.signal.aborted) {
+        // User pressed stop: keep whatever we have as a partial rewrite
+        if (finalText.trim()) {
+          await dbSet('rw', { k: idbKey, text: finalText })
+          setCache(p => ({...p, [capturedChIdx]: {...(p[capturedChIdx]||{}), [s.id]: finalText}}))
+          if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+          setStreamText(finalText)
+          setChIdx(cur => {
+            if (cur === capturedChIdx) {
+              setViewMode('rewritten')
+              if (capturedBookId) saveRwState(capturedBookId, capturedChIdx, s.id, 'rewritten')
+            }
+            return cur
+          })
+        }
+        rewriteAbort.current = null
+        setRewriteLoading(false); setRewriteProgress(null)
+        return
+      }
+
       rewriteAbort.current = null
       if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
       setStreamText(finalText)
+      await dbSet('rw', { k: idbKey, text: finalText })
+      await dbDel('rw', partialKey)  // clean up partial
       setCache(p => ({...p, [capturedChIdx]: {...(p[capturedChIdx]||{}), [s.id]: finalText}}))
-      // Only update viewMode if user is still on the same chapter we rewrote
       setChIdx(cur => {
         if (cur === capturedChIdx) {
           setViewMode('rewritten')
           if (capturedBookId) saveRwState(capturedBookId, capturedChIdx, s.id, 'rewritten')
         }
-        return cur  // don't actually change chIdx
+        return cur
       })
     } catch(e) {
       rewriteAbort.current = null
       if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
-      // Ignore AbortError — it means user navigated away intentionally
-      if (e?.name === 'AbortError') { setRewriteLoading(false); return }
-      showToast('改写出错: '+(e?.message||e), 3000)
-      // Only reset viewMode if still on same chapter
-      setChIdx(cur => { if (cur === capturedChIdx) setViewMode('original'); return cur })
+      if (e?.name === 'AbortError') {
+        // Aborted but finalText is empty — nothing to show, restore original
+        if (!finalText.trim()) {
+          setChIdx(cur => { if (cur === capturedChIdx) setViewMode('original'); return cur })
+        }
+        setRewriteLoading(false); setRewriteProgress(null)
+        return
+      }
+      showToast('改写出错: ' + (e?.message || e), 4000)
+      // Keep partial content if we have some — don't revert to original
+      if (finalText.trim()) {
+        await dbSet('rw', { k: idbKey, text: finalText })
+        setCache(p => ({...p, [capturedChIdx]: {...(p[capturedChIdx]||{}), [s.id]: finalText}}))
+        if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+        setStreamText(finalText)
+        setChIdx(cur => {
+          if (cur === capturedChIdx) {
+            setViewMode('rewritten')
+            if (capturedBookId) saveRwState(capturedBookId, capturedChIdx, s.id, 'rewritten')
+          }
+          return cur
+        })
+      } else {
+        setChIdx(cur => { if (cur === capturedChIdx) setViewMode('original'); return cur })
+      }
     }
-    setRewriteLoading(false)
+    setRewriteLoading(false); setRewriteProgress(null)
   }, [curApiKey, chapter, chIdx, book, settings, saveRwState])
 
   const confirmStyle = useCallback(() => { if (pendingStyleId) doRewrite(pendingStyleId) }, [pendingStyleId, doRewrite])
@@ -1202,7 +1293,12 @@ export default function App() {
         }}>
           {/* Back / Menu toggle */}
           {screen==='reading' && (
-            <button onClick={()=>{ setScreen('home'); setShowControls(false); setSidebarOpen(false) }} style={{
+            <button onClick={()=>{ 
+              if (rewriteAbort.current) { rewriteAbort.current.abort(); rewriteAbort.current = null }
+              if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+              setRewriteLoading(false); setStreamText('')
+              setScreen('home'); setShowControls(false); setSidebarOpen(false)
+            }} style={{
               width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',
               background:'none',border:'none',borderRadius:10,color:t.text,cursor:'pointer',flexShrink:0,
             }}>
@@ -1220,16 +1316,23 @@ export default function App() {
           {/* Right: AI sheet + settings */}
           <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
             {screen==='reading' && book && (
-              <button onClick={()=>setShowAiSheet(true)} style={{
+              <button onClick={()=>{ if(rewriteLoading) stopRewrite(); else setShowAiSheet(true) }} style={{
                 height:34,padding:'0 14px',display:'flex',alignItems:'center',gap:5,
-                background: (style||ttsPlaying||ttsPaused) ? t.accent+'20' : 'none',
-                border:`1px solid ${(style||ttsPlaying||ttsPaused)?t.accent:t.border}`,
-                borderRadius:17,color:(style||ttsPlaying||ttsPaused)?t.accent:t.muted,
+                background: (rewriteLoading||style||ttsPlaying||ttsPaused) ? t.accent+'20' : 'none',
+                border:`1px solid ${(rewriteLoading||style||ttsPlaying||ttsPaused)?t.accent:t.border}`,
+                borderRadius:17,color:(rewriteLoading||style||ttsPlaying||ttsPaused)?t.accent:t.muted,
                 fontSize:13,cursor:'pointer',fontFamily:'inherit',
               }}>
-                {ttsPlaying ? <><Spinner size={11} color={t.accent}/><span style={{fontSize:13}}>朗读中</span></> :
-                 ttsPaused ? <><Ic name='pause' size={14} color={t.accent}/><span style={{fontSize:13}}>暂停</span></> :
-                 style ? <><Ic name='wand' size={14} color={t.accent}/><span style={{fontSize:13}}>{style.name}</span></> : <><Ic name='wand' size={14} color={t.muted}/><span style={{fontSize:13}}>AI</span></>}
+                {rewriteLoading
+                  ? <><Spinner size={11} color={t.accent}/>
+                      <span style={{fontSize:13}}>
+                        {rewriteProgress ? `转写 ${rewriteProgress.done}/${rewriteProgress.total}` : '转写中'}
+                      </span>
+                      <span style={{fontSize:11,opacity:.7,marginLeft:2}}>✕</span></>
+                  : ttsPlaying ? <><Spinner size={11} color={t.accent}/><span style={{fontSize:13}}>朗读中</span></>
+                  : ttsPaused ? <><Ic name='pause' size={14} color={t.accent}/><span style={{fontSize:13}}>暂停</span></>
+                  : style ? <><Ic name='wand' size={14} color={t.accent}/><span style={{fontSize:13}}>{style.name}</span></> 
+                  : <><Ic name='wand' size={14} color={t.muted}/><span style={{fontSize:13}}>AI</span></>}
               </button>
             )}
             {screen==='reading' && <>
