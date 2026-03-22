@@ -67,6 +67,7 @@ const PROVIDERS = [
 const STORAGE_KEY = 'qiyue_settings_v3'
 const READ_POS_KEY = 'qiyue_read_pos'
 const NOTES_KEY   = 'qiyue_notes_v1'
+const RW_STATE_KEY = 'qiyue_rw_state'  // persists viewMode + styleId per book+chapter
 
 const DEFAULT_SETTINGS = {
   bgTheme:'dew-white', fontSize:20, lineHeight:1.95, fontType:'lora',
@@ -620,18 +621,48 @@ export default function App() {
   }, [screen, book, chIdx, totalCh])
 
   // ── Book management ───────────────────────────────────────────────────────────
+  // Load all cached rewrites for a chapter from IndexedDB
+  const loadChapterCache = useCallback(async (bookId, idx) => {
+    const loaded = {}
+    for (const s of STYLES) {
+      const row = await dbGet('rw', `${bookId}_${idx}_${s.id}`)
+      if (row?.text) {
+        if (!loaded[idx]) loaded[idx] = {}
+        loaded[idx][s.id] = row.text
+      }
+    }
+    if (Object.keys(loaded).length > 0) setCache(p => ({...p, ...loaded}))
+    return loaded
+  }, [])
+
   const loadBook = useCallback(async meta => {
     let b = meta.chapters ? meta : await dbGet('books', meta.id)
     if (!b) { alert('书籍数据丢失，请重新上传'); return }
-    setBook(b); setChIdx(0); setViewMode('original'); setStyle(null)
-    setCache({}); setStreamText(''); setSidebarTab('chapters')
+
+    const saved   = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
+    const savedCh = saved.bookId === b.id ? (saved.chIdx||0) : 0
+
+    setBook(b); setChIdx(savedCh); setStreamText(''); setSidebarTab('chapters')
+    setCache({})
     if (isMob) setSidebarOpen(false)
-    const saved = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
+
+    // Load rewrite cache for this chapter
+    const chCache = await loadChapterCache(b.id, savedCh)
+
+    // Restore viewMode + style if a rewrite was active
+    const rwState = JSON.parse(localStorage.getItem(RW_STATE_KEY)||'{}')
+    const rwKey   = `${b.id}_${savedCh}`
+    const si      = rwState[rwKey]?.styleId
+    const vm      = rwState[rwKey]?.viewMode || 'original'
+    const s       = si ? STYLES.find(st => st.id === si) : null
+    if (s && chCache[savedCh]?.[si]) { setStyle(s); setViewMode(vm) }
+    else { setStyle(null); setViewMode('original') }
+
     if (saved.bookId === b.id) {
-      setTimeout(() => { setChIdx(saved.chIdx||0); pendingScrollRef.current = saved.scrollPct||0 }, 50)
+      setTimeout(() => { pendingScrollRef.current = saved.scrollPct||0 }, 50)
     }
     setScreen('reading')
-  }, [isMob])
+  }, [isMob, loadChapterCache])
 
   const handleFile = useCallback(async file => {
     if (!file?.name.match(/\.epub$/i)) { alert('请上传 .epub 文件'); return }
@@ -654,13 +685,35 @@ export default function App() {
     if (book?.id === bookId) { setBook(null); setChIdx(0); setViewMode('original'); setCache({}) }
   }, [book])
 
-  const goChapter = useCallback(idx => {
-    setChIdx(idx); setViewMode('original'); setStreamText('')
+  const goChapter = useCallback(async idx => {
+    setChIdx(idx); setStreamText('')
     lsSave(READ_POS_KEY, { bookId: book?.id, chIdx: idx, scrollPct: 0 })
     if (isMob) setSidebarOpen(false)
-  }, [book, isMob])
+
+    if (!book) return
+
+    // Load cached rewrites for this chapter
+    const chCache = await loadChapterCache(book.id, idx)
+
+    // Restore rewrite state if one was saved for this chapter
+    const rwState = JSON.parse(localStorage.getItem(RW_STATE_KEY)||'{}')
+    const rwKey   = `${book.id}_${idx}`
+    const si      = rwState[rwKey]?.styleId
+    const vm      = rwState[rwKey]?.viewMode || 'original'
+    const s       = si ? STYLES.find(st => st.id === si) : null
+    if (s && chCache[idx]?.[si]) { setStyle(s); setViewMode(vm) }
+    else { setViewMode('original') }
+  }, [book, isMob, loadChapterCache])
 
   // ── Rewrite ───────────────────────────────────────────────────────────────────
+  const saveRwState = useCallback((bookId, idx, styleId, vm) => {
+    try {
+      const rwState = JSON.parse(localStorage.getItem(RW_STATE_KEY)||'{}')
+      rwState[`${bookId}_${idx}`] = { styleId, viewMode: vm }
+      localStorage.setItem(RW_STATE_KEY, JSON.stringify(rwState))
+    } catch {}
+  }, [])
+
   const doRewrite = useCallback(async styleId => {
     const s = STYLES.find(s=>s.id===styleId); if (!s) return
     setShowStyleModal(false); setStyle(s)
@@ -684,9 +737,10 @@ export default function App() {
       await dbSet('rw', { k:key, text:finalText })
       setCache(p => ({...p, [chIdx]: {...(p[chIdx]||{}), [s.id]: finalText}}))
       setViewMode('rewritten')
+      if (book?.id) saveRwState(book.id, chIdx, s.id, 'rewritten')
     } catch(e) { setToast('改写出错: '+(e?.message||e)); setTimeout(()=>setToast(''),3000); setViewMode('original') }
     setRewriteLoading(false)
-  }, [curApiKey, chapter, chIdx, book, settings])
+  }, [curApiKey, chapter, chIdx, book, settings, saveRwState])
 
   const confirmStyle = useCallback(() => { if (pendingStyleId) doRewrite(pendingStyleId) }, [pendingStyleId, doRewrite])
 
@@ -1157,7 +1211,7 @@ export default function App() {
                   borderRadius:14,overflow:'hidden',padding:3,gap:3,
                 }}>
                   {['original','rewritten'].map(m=>(
-                    <button key={m} onClick={()=>{setViewMode(m);setStreamText('');setShowAiSheet(false)}} style={{
+                    <button key={m} onClick={()=>{setViewMode(m);setStreamText('');setShowAiSheet(false);if(book?.id&&style)saveRwState(book.id,chIdx,style.id,m)}} style={{
                       flex:1,height:38,border:'none',
                       background:viewMode===m ? (t.id==='night'?'rgba(255,255,255,0.12)':t.card) : 'none',
                       borderRadius:11,color:viewMode===m?t.text:t.muted,
