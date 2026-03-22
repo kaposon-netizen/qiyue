@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { TextToSpeech } from '@capacitor-community/text-to-speech'
 
 // ─── Themes · 中国传统色 ───────────────────────────────────────────────────────
@@ -367,6 +367,7 @@ export default function App() {
   const pendingScrollRef = useRef(null)
   const selPanelRef      = useRef(null)
   const streamThrottle   = useRef(null)  // throttle streaming UI updates to ~100ms
+  const toastTimer       = useRef(null)  // managed toast auto-dismiss
   // Sync selMode to a ref so selectionchange handler always sees current value
   const selModeRef       = useRef('')
   selModeRef.current     = selMode
@@ -497,6 +498,12 @@ export default function App() {
     setSelAiReply('')
   }, [])
 
+  const showToast = useCallback((msg, duration=1800) => {
+    if (toastTimer.current) clearTimeout(toastTimer.current)
+    setToast(msg)
+    toastTimer.current = setTimeout(() => { setToast(''); toastTimer.current = null }, duration)
+  }, [])
+
   // ── Close selection panel when reader scrolls (prevents "ghost" panel) ────────
   useEffect(() => {
     const reader = readerRef.current
@@ -523,16 +530,14 @@ export default function App() {
       date: new Date().toLocaleDateString('zh-CN')
     }
     saveNotes([note, ...notes])
-    setToast(thought ? '想法已保存 ✓' : '已加入笔记 ✓')
-    setTimeout(() => setToast(''), 1800)
-  }, [book, chIdx, chapter, viewMode, notes, saveNotes])
+    showToast(thought ? '想法已保存 ✓' : '已加入笔记 ✓', 1800)
+  }, [book, chIdx, chapter, viewMode, notes, saveNotes, showToast])
 
   const deleteNote    = useCallback(id => saveNotes(notes.filter(n=>n.id!==id)), [notes, saveNotes])
   const updateThought = useCallback((id, thought) => {
     saveNotes(notes.map(n => n.id===id ? {...n,thought} : n))
-    setToast('想法已更新 ✓')
-    setTimeout(() => setToast(''), 1800)
-  }, [notes, saveNotes])
+    showToast('想法已更新 ✓', 1800)
+  }, [notes, saveNotes, showToast])
 
   // ── TTS ───────────────────────────────────────────────────────────────────────
   const ttsStop = useCallback(async () => {
@@ -597,7 +602,7 @@ export default function App() {
   }, [ttsProgress])
 
   const ttsSpeak = useCallback(async () => {
-    if (!displayText?.trim()) { setToast('没有可朗读的内容'); setTimeout(()=>setToast(''),2000); return }
+    if (!displayText?.trim()) { showToast('没有可朗读的内容', 2000); return }
     if (ttsRef.current) ttsRef.current.stopped = true
     try { await TextToSpeech.stop() } catch {}
 
@@ -729,16 +734,16 @@ export default function App() {
 
   const handleFile = useCallback(async file => {
     if (!file?.name.match(/\.epub$/i)) { alert('请上传 .epub 文件'); return }
-    if (file.size > 50 * 1024 * 1024) { setToast('文件过大，上限 50MB'); setTimeout(()=>setToast(''),3000); return }
-    setToast('解析中…')
+    if (file.size > 50 * 1024 * 1024) { showToast('文件过大，上限 50MB', 3000); return }
+    showToast('解析中…', 30000)  // long timeout — will be cleared on success or error
     try {
       const meta = await parseEpub(file)
       await dbSet('books', meta)
       setLibrary(prev => [{id:meta.id,title:meta.title,author:meta.author,addedAt:meta.addedAt},...prev.filter(b=>b.id!==meta.id)])
-      setToast('')
+      showToast('', 0)  // clear immediately on success
       await loadBook(meta)
-    } catch(e) { setToast('解析失败: '+(e?.message||e)); setTimeout(()=>setToast(''),3000) }
-  }, [loadBook])
+    } catch(e) { showToast('解析失败: '+(e?.message||e), 3000) }
+  }, [loadBook, showToast])
 
   const onDrop = useCallback(e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]) }, [handleFile])
 
@@ -763,19 +768,19 @@ export default function App() {
     const targetBookId = book.id  // snapshot before async gap
 
     // Load cached rewrites for this chapter
-    const chCache = await loadChapterCache(book.id, idx)
+    const chCache = await loadChapterCache(book.id, idx_)
 
     // Guard: abort if user navigated away during IDB fetch
     const currentPos = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
-    if (currentPos.chIdx !== idx || currentPos.bookId !== targetBookId) return
+    if (currentPos.chIdx !== idx_ || currentPos.bookId !== targetBookId) return
 
     // Restore rewrite state if one was saved for this chapter
     const rwState = JSON.parse(localStorage.getItem(RW_STATE_KEY)||'{}')
-    const rwKey   = `${targetBookId}_${idx}`
+    const rwKey   = `${targetBookId}_${idx_}`
     const si      = rwState[rwKey]?.styleId
     const vm      = rwState[rwKey]?.viewMode || 'original'
     const s       = si ? STYLES.find(st => st.id === si) : null
-    if (s && chCache[idx]?.[si]) { setStyle(s); setViewMode(vm) }
+    if (s && chCache[idx_]?.[si]) { setStyle(s); setViewMode(vm) }
     else { setStyle(null); setViewMode('original') }
   }, [book, isMob, loadChapterCache])
 
@@ -845,7 +850,7 @@ export default function App() {
       })
     } catch(e) {
       if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
-      setToast('改写出错: '+(e?.message||e)); setTimeout(()=>setToast(''),3000)
+      showToast('改写出错: '+(e?.message||e), 3000)
       // Only reset viewMode if still on same chapter
       setChIdx(cur => { if (cur === capturedChIdx) setViewMode('original'); return cur })
     }
@@ -1096,13 +1101,13 @@ export default function App() {
                   onThought={()=>{ setThoughtModal({noteId:n.id}); setThoughtInput(n.thought||'') }}
                   onShare={()=>{
                     const txt = `「${n.text}」${n.thought?'\n💭 '+n.thought:''}\n——《${n.book}》`
-                    navigator.share ? navigator.share({text:txt}) : navigator.clipboard?.writeText(txt).then(()=>{setToast('已复制');setTimeout(()=>setToast(''),1500)})
+                    navigator.share ? navigator.share({text:txt}) : navigator.clipboard?.writeText(txt).then(()=>{showToast('已复制', 1500)})
                   }}
                   onNavigate={async ()=>{
                     if (n.bookId && n.bookId!==book?.id) {
                       const bk = await dbGet('books', n.bookId)
                       if (bk) { await loadBook(bk); setTimeout(()=>{ setChIdx(n.chIdx||0); pendingScrollRef.current=n.scrollPct||0; setScrollTrigger(x=>x+1) },200) }
-                      else { setToast('书籍已删除'); setTimeout(()=>setToast(''),2000) }
+                      else { showToast('书籍已删除', 2000) }
                     } else if ((n.chIdx||0) !== chIdx) {
                       pendingScrollRef.current = n.scrollPct||0
                       setChIdx(n.chIdx||0)
@@ -1710,6 +1715,9 @@ function NoteItem({ n, t, onDelete, onNavigate, onShare, onThought }) {
     }
   }
   const endPress = () => clearTimeout(pressTimer.current)
+
+  // Clear timer on unmount to prevent setState-after-unmount
+  useEffect(() => () => clearTimeout(pressTimer.current), [])
 
   return (
     <div style={{borderBottom:`1px solid ${t.border}`,padding:'14px 0',position:'relative',userSelect:'none',WebkitUserSelect:'none'}}>
