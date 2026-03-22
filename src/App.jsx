@@ -26,13 +26,13 @@ const BG_THEMES = [
 // ─── Rewrite styles ───────────────────────────────────────────────────────────
 const STYLES = [
   { id:'story',     name:'故事流', desc:'画面感强，节奏明快',
-    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变\n风格：故事感强，画面生动，句子简短有节奏。直接输出，不加说明。` },
+    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变 ④输出必须全部用中文\n风格：故事感强，画面生动，句子简短有节奏。` },
   { id:'dialogue',  name:'对话版', desc:'多用对话，少大段叙述',
-    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变\n风格：用人物对话推进情节，配合简短动作描写，像看连续剧。直接输出，不加说明。` },
+    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变 ④输出必须全部用中文\n风格：用人物对话推进情节，配合简短动作描写，像看连续剧。` },
   { id:'adventure', name:'探险风', desc:'紧张感强，带入感十足',
-    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变\n风格：充满紧迫感和好奇心，短句制造节奏感，读者感觉在现场。直接输出，不加说明。` },
+    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变 ④输出必须全部用中文\n风格：充满紧迫感和好奇心，短句制造节奏感，读者感觉在现场。` },
   { id:'simple',    name:'简白版', desc:'最简单直白，像朋友聊天',
-    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变\n风格：最简单的现代中文，句子短，逻辑清楚，像朋友讲故事。直接输出，不加说明。` },
+    prompt:`你是专业儿童文学改编师。改写以下内容，让10岁孩子轻松读懂并喜欢阅读。\n规则：①情节事件人物对话100%保留 ②人名地名不变 ③主题因果不变 ④输出必须全部用中文\n风格：最简单的现代中文，句子短，逻辑清楚，像朋友讲故事。` },
 ]
 
 const FONTS = {
@@ -225,7 +225,7 @@ function htmlToText(html) {
 function extractTitle(html) { const m=html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i); return m?htmlToText(m[1]).trim().slice(0,60):null }
 
 // ─── AI streaming ─────────────────────────────────────────────────────────────
-async function streamAI(apiKey, system, user, onChunk, provider='claude', model) {
+async function streamAI(apiKey, system, user, onChunk, provider='claude', model, signal=null) {
   if (!apiKey) throw new Error('请先在设置中填写 ' + (PROVIDERS.find(p=>p.id===provider)?.name||'') + ' API Key')
   const prov = PROVIDERS.find(p=>p.id===provider) || PROVIDERS[0]
 
@@ -238,6 +238,7 @@ async function streamAI(apiKey, system, user, onChunk, provider='claude', model)
     const dec = new TextDecoder(); let buf='', full=''
     try {
       while(true) {
+        if (signal?.aborted) break  // honour abort immediately
         const{done,value}=await reader.read(); if(done)break
         buf+=dec.decode(value,{stream:true}); const lines=buf.split('\n'); buf=lines.pop()||''
         for(const line of lines){
@@ -256,10 +257,10 @@ async function streamAI(apiKey, system, user, onChunk, provider='claude', model)
 
   if (prov.directUrl) {
     const msgs=system?[{role:'system',content:system},{role:'user',content:user}]:[{role:'user',content:user}]
-    const resp=await fetch(prov.directUrl,{method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${apiKey}`},body:JSON.stringify({model,messages:msgs,stream:true})})
+    const resp=await fetch(prov.directUrl,{method:'POST',headers:{'content-type':'application/json','authorization':`Bearer ${apiKey}`},body:JSON.stringify({model,messages:msgs,stream:true}),signal})
     return readSSE(await checkResp(resp), true)
   }
-  const resp=await fetch(prov.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apiKey,system,messages:[{role:'user',content:user}],model})})
+  const resp=await fetch(prov.endpoint,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({apiKey,system,messages:[{role:'user',content:user}],model}),signal})
   return readSSE(await checkResp(resp), false)
 }
 
@@ -390,6 +391,7 @@ export default function App() {
   const pendingScrollRef = useRef(null)
   const selPanelRef      = useRef(null)
   const streamThrottle   = useRef(null)  // throttle streaming UI updates to ~100ms
+  const rewriteAbort    = useRef(null)  // AbortController for in-flight rewrite fetch
   const toastTimer       = useRef(null)  // managed toast auto-dismiss
   // Sync selMode to a ref so selectionchange handler always sees current value
   const selModeRef       = useRef('')
@@ -733,6 +735,11 @@ export default function App() {
     const rawCh   = saved.chIdx
     const savedCh = (Number.isInteger(rawCh) && rawCh >= 0 && rawCh < (b.chapters?.length||1)) ? rawCh : 0
 
+    // Abort any in-flight rewrite from previous book/chapter
+    if (rewriteAbort.current) { rewriteAbort.current.abort(); rewriteAbort.current = null }
+    if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+    setRewriteLoading(false)
+
     setBook(b); setChIdx(savedCh); setStreamText(''); setSidebarTab('chapters')
     setCache({})
     if (isMob) setSidebarOpen(false)
@@ -789,6 +796,14 @@ export default function App() {
     const safeIdx = Math.floor(Number(idx))
     if (!Number.isFinite(safeIdx) || safeIdx < 0 || (book && safeIdx >= book.chapters.length)) return
     const idx_ = safeIdx  // use sanitized value
+
+    // Abort any in-flight rewrite for the chapter we're leaving
+    if (rewriteAbort.current) { rewriteAbort.current.abort(); rewriteAbort.current = null }
+    if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+    setRewriteLoading(false)
+    setViewMode('original')
+    setStreamText('')
+
     setChIdx(idx_); setStreamText('')
     saveReadPos(book?.id, idx_, 0)
     if (isMob) setSidebarOpen(false)
@@ -831,10 +846,24 @@ export default function App() {
     // Snapshot mutable values before any await — prevents stale closure bugs
     const capturedChIdx  = chIdx
     const capturedBookId = book?.id
+    // Cancel any previous rewrite that might still be running
+    if (rewriteAbort.current) { rewriteAbort.current.abort(); rewriteAbort.current = null }
+    const abort = new AbortController()
+    rewriteAbort.current = abort
+
     setViewMode('rewriting'); setStreamText(''); setRewriteLoading(true)
     let finalText = '', chunks = []
     const CHUNK = 1800
-    if (text.length > CHUNK) for (let i=0;i<text.length;i+=CHUNK) chunks.push(text.slice(i,Math.min(i+CHUNK,text.length)))
+    if (text.length > CHUNK) {
+      // Split on paragraph boundaries — never cut mid-sentence
+      const paras = text.split('\n').filter(p => p.trim())
+      let cur = ''
+      for (const p of paras) {
+        if (cur && (cur.length + p.length + 1) > CHUNK) { chunks.push(cur.trim()); cur = p }
+        else cur = cur ? cur + '\n' + p : p
+      }
+      if (cur.trim()) chunks.push(cur.trim())
+    }
     try {
       if (!chunks.length) {
         await streamAI(curApiKey, s.prompt, `改写以下内容：\n\n${text}`, chunk => {
@@ -846,11 +875,11 @@ export default function App() {
               streamThrottle.current = null
             }, 80)
           }
-        }, settings.provider, settings.model)
+        }, settings.provider, settings.model, abort.signal)
       } else {
         for (let i=0; i<chunks.length; i++) {
           let co = ''
-          await streamAI(curApiKey, s.prompt, `第${i+1}段（共${chunks.length}段）：\n\n${chunks[i]}`, chunk => {
+          await streamAI(curApiKey, s.prompt, `这是第${i+1}段，共${chunks.length}段，请保持风格和语言连贯，输出必须用中文：\n\n${chunks[i]}`, chunk => {
             co = chunk
             if (!streamThrottle.current) {
               const snapFinal = finalText  // capture outer accumulator
@@ -860,13 +889,14 @@ export default function App() {
                 streamThrottle.current = null
               }, 80)
             }
-          }, settings.provider, settings.model)
+          }, settings.provider, settings.model, abort.signal)
           finalText += co
         }
       }
       const key = `${capturedBookId}_${capturedChIdx}_${s.id}`
       await dbSet('rw', { k:key, text:finalText })
-      // Clear any pending throttle and do a final update
+      // Clear abort ref and any pending throttle
+      rewriteAbort.current = null
       if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
       setStreamText(finalText)
       setCache(p => ({...p, [capturedChIdx]: {...(p[capturedChIdx]||{}), [s.id]: finalText}}))
@@ -879,7 +909,10 @@ export default function App() {
         return cur  // don't actually change chIdx
       })
     } catch(e) {
+      rewriteAbort.current = null
       if (streamThrottle.current) { clearTimeout(streamThrottle.current); streamThrottle.current = null }
+      // Ignore AbortError — it means user navigated away intentionally
+      if (e?.name === 'AbortError') { setRewriteLoading(false); return }
       showToast('改写出错: '+(e?.message||e), 3000)
       // Only reset viewMode if still on same chapter
       setChIdx(cur => { if (cur === capturedChIdx) setViewMode('original'); return cur })
