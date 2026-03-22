@@ -64,7 +64,8 @@ const PROVIDERS = [
     models:[ {id:'gemini-2.5-pro',name:'2.5 Pro (最强)'}, {id:'gemini-2.0-flash',name:'2.0 Flash (推荐)'} ] },
 ]
 
-const APP_VERSION = '2.4.0'  // YYYY-MM-DD → bump on every release
+const APP_VERSION  = '2.4.0'   // bump on every release
+const STORAGE_KEY  = 'qiyue_settings_v3'
 const READ_POS_KEY = 'qiyue_read_pos'  // legacy — kept for migration only
 
 // ── Per-book reading position helpers ─────────────────────────────────────────
