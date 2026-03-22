@@ -1,14 +1,26 @@
 import { useState, useRef, useCallback, useEffect } from 'react'
 import { TextToSpeech } from '@capacitor-community/text-to-speech'
 
-// ─── Themes ───────────────────────────────────────────────────────────────────
+// ─── Themes · 中国传统色 ───────────────────────────────────────────────────────
+// 来源：chinese-color-theme-tool.jsx，6套传统色 + 夜砚暗色模式
 const BG_THEMES = [
-  { id:'paper',    label:'纸白',   bg:'#faf7f2', sidebar:'#f0e8d8', text:'#2a1f14', muted:'#9a8572', accent:'#b8723e', border:'#e2d5c0', card:'#fffbf4', hover:'#ede3d0' },
-  { id:'mint',     label:'薄荷',   bg:'#f0faf4', sidebar:'#e2f5e8', text:'#1a3a28', muted:'#6a9478', accent:'#2e8b57', border:'#c5e8d0', card:'#f8fffe', hover:'#d6f0e0' },
-  { id:'sky',      label:'天空',   bg:'#f0f8ff', sidebar:'#e0f0fa', text:'#1a2f3a', muted:'#6a8898', accent:'#3a7ca5', border:'#c0dcea', card:'#f8fcff', hover:'#d0e8f8' },
-  { id:'lavender', label:'薰衣草', bg:'#f8f4ff', sidebar:'#eee6ff', text:'#2a1f3a', muted:'#8a78aa', accent:'#7c5cbf', border:'#d8ccee', card:'#fdfaff', hover:'#e8dff8' },
-  { id:'peach',    label:'蜜桃',   bg:'#fff8f4', sidebar:'#ffeee5', text:'#3a1f14', muted:'#aa8070', accent:'#e07050', border:'#f0d5c8', card:'#fffcfa', hover:'#ffe8dc' },
-  { id:'night',    label:'夜间',   bg:'#141418', sidebar:'#1c1c22', text:'#e8e0d4', muted:'#5a5560', accent:'#d4956a', border:'#2a2a32', card:'#1e1e26', hover:'#242430' },
+  // 凝脂·白露 — 凝脂#F5F2E9 玉色#EAE2D1 黄润#DFD6B8 缣缃#D5C896
+  // 宣纸质感，最适合长时间阅读
+  { id:'dew-white',    label:'凝脂·白露', bg:'#faf7f0', sidebar:'#ede5d0', text:'#2a2418', muted:'#9a8e78', accent:'#8a7840', border:'#ddd0b0', card:'#fffcf5', hover:'#e8dfc8' },
+  // 窃蓝·立秋 — 窃蓝#88ABDA 监德#6F94CD 苍苍#5976BA 群青#2E45A7
+  // 静谧清雅，护眼蓝调
+  { id:'autumn-blue',  label:'窃蓝·立秋', bg:'#f0f5ff', sidebar:'#dce9f8', text:'#1a2848', muted:'#6a88b8', accent:'#5976ba', border:'#bcd4ee', card:'#f8fcff', hover:'#d4e5f5' },
+  // 退红·处暑 — 退红#F0CFE3 樱花#E4B8D5 丁香#CE93BF 木槿#BA79B1
+  // 柔和温润，亲和雅致
+  { id:'heat-pink',    label:'退红·处暑', bg:'#faf0f8', sidebar:'#f0ddf0', text:'#2a0828', muted:'#9a6898', accent:'#a058a0', border:'#dcc8e0', card:'#fefaff', hover:'#eddde8' },
+  // 青粲·立夏 — 青粲#C3D94E 翠缥#B7D332 人籁#9EBC19 水龙吟#84A729
+  // 生机盎然，清新自然
+  { id:'summer-green', label:'青粲·立夏', bg:'#f4f9ea', sidebar:'#e2f0c8', text:'#182810', muted:'#6a8848', accent:'#7a9610', border:'#c4de88', card:'#f8fbf0', hover:'#d4e8a8' },
+  // 银朱·霜降 — 银朱#D12920 胭脂虫#AB1D22 朱樱#8F1D22 爵头#631216
+  // 经典朱红，故宫宫墙
+  { id:'frost-red',    label:'银朱·霜降', bg:'#fff5f5', sidebar:'#ffe0e0', text:'#3a0a0a', muted:'#a05050', accent:'#c42020', border:'#f0c0b8', card:'#fff8f8', hover:'#ffe0e0' },
+  // 夜砚 — 深墨夜间模式，accent 用琥珀暖金
+  { id:'night',        label:'夜砚',       bg:'#141418', sidebar:'#1c1c22', text:'#e8e0d4', muted:'#5a5560', accent:'#d4956a', border:'#2a2a32', card:'#1e1e26', hover:'#242430' },
 ]
 
 // ─── Rewrite styles ───────────────────────────────────────────────────────────
@@ -24,10 +36,20 @@ const STYLES = [
 ]
 
 const FONTS = {
-  serif: "'Noto Serif SC', Georgia, 'STSong', serif",
-  sans:  "'PingFang SC', 'Microsoft YaHei', 'Noto Sans SC', sans-serif",
+  lora:      "'Lora', 'Noto Serif SC', Georgia, serif",           // 经典衬线，英文最美
+  notoserif: "'Noto Serif SC', 'Source Han Serif SC', serif",     // 思源宋体，中文最佳
+  merriweather: "'Merriweather', 'Noto Serif SC', Georgia, serif", // 厚重衬线，阅读舒适
+  inter:     "'Inter', 'PingFang SC', 'Noto Sans SC', sans-serif", // 现代无衬线
+  notosans:  "'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif", // 思源黑体
 }
 
+const FONT_OPTIONS = [
+  { id:'lora',         label:'Lora',         sub:'经典衬线',    sample:'The quick fox' },
+  { id:'notoserif',    label:'思源宋体',      sub:'中文最佳',    sample:'床前明月光' },
+  { id:'merriweather', label:'Merriweather',  sub:'厚重舒适',    sample:'The quick fox' },
+  { id:'inter',        label:'Inter',         sub:'现代无衬线',  sample:'The quick fox' },
+  { id:'notosans',     label:'思源黑体',      sub:'简洁清晰',    sample:'床前明月光' },
+]
 // ─── AI Providers ─────────────────────────────────────────────────────────────
 const PROVIDERS = [
   { id:'claude', name:'Claude',    endpoint:'/api/chat',
@@ -47,7 +69,7 @@ const READ_POS_KEY = 'qiyue_read_pos'
 const NOTES_KEY   = 'qiyue_notes_v1'
 
 const DEFAULT_SETTINGS = {
-  bgTheme:'paper', fontSize:18, lineHeight:1.9, fontType:'serif',
+  bgTheme:'dew-white', fontSize:20, lineHeight:1.95, fontType:'lora',
   provider:'claude', model:'claude-haiku-4-5-20251001',
   apiKeys:{ claude:'', zhipu:'', qwen:'', gemini:'' },
 }
@@ -131,10 +153,41 @@ async function parseEpub(file) {
 }
 function htmlToText(html) {
   html = html.replace(/<script[\s\S]*?<\/script>/gi,'').replace(/<style[\s\S]*?<\/style>/gi,'')
-  html = html.replace(/<\/?(?:p|div|h[1-6]|li|tr|br|blockquote)[^>]*>/gi,'\n').replace(/<[^>]+>/g,'')
-  return html.replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&')
+  // Headings → newline + text + newline
+  html = html.replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, (_,c) => '\n' + c + '\n')
+  // Block elements: close tag → paragraph separator §§
+  html = html.replace(/<\/(?:p|div|li|tr|blockquote|section|article)[^>]*>/gi, '§§')
+  // <br> → space (it's inline, not a paragraph break)
+  html = html.replace(/<br\s*\/?>/gi, ' ')
+  html = html.replace(/<[^>]+>/g, '')
+  // Decode entities
+  html = html.replace(/&nbsp;/g,' ').replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/&amp;/g,'&')
              .replace(/&quot;/g,'"').replace(/&#(\d+);/g,(_,n)=>String.fromCharCode(+n)).replace(/&[a-z]+;/g,' ')
-             .replace(/\n{3,}/g,'\n\n').trim()
+  // Split, trim, filter empties
+  const chunks = html.split('§§').map(s => s.replace(/[ \t]+/g,' ').trim()).filter(s => s.length > 0)
+
+  // Merge fragment lines:
+  // A chunk is a "fragment" if it:
+  //   (a) doesn't end with sentence-ending punctuation, OR
+  //   (b) ends with , ; : (definitely mid-sentence)
+  // Merge it with the next chunk.
+  const SENT_END = /[.!?。！？…"'\]—–]$/
+  const FRAG_END  = /[,;:]$/   // comma/semicolon/colon → always merge
+  const merged = []
+  let buf = ''
+  for (const chunk of chunks) {
+    if (!buf) { buf = chunk; continue }
+    const isFragment = FRAG_END.test(buf) || (!SENT_END.test(buf) && buf.length < 400)
+    if (isFragment) {
+      buf = buf + ' ' + chunk
+    } else {
+      merged.push(buf)
+      buf = chunk
+    }
+  }
+  if (buf) merged.push(buf)
+
+  return merged.join('\n').replace(/\n{3,}/g,'\n\n').trim()
 }
 function extractTitle(html) { const m=html.match(/<h[1-3][^>]*>([\s\S]*?)<\/h[1-3]>/i); return m?htmlToText(m[1]).trim().slice(0,60):null }
 
@@ -158,6 +211,54 @@ async function streamAI(apiKey, system, user, onChunk, provider='claude', model)
 }
 
 // ─── Tiny shared UI ───────────────────────────────────────────────────────────
+// ─── SVG Icons (professional, consistent stroke-based) ───────────────────────
+function Icon({ d, size=20, color='currentColor', strokeWidth=1.6, fill='none' }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={fill}
+      stroke={color} strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round"
+      style={{flexShrink:0,display:'block'}}>
+      {Array.isArray(d) ? d.map((p,i)=><path key={i} d={p}/>) : <path d={d}/>}
+    </svg>
+  )
+}
+
+// Icon paths
+const IC = {
+  menu:     'M3 12h18M3 6h18M3 18h18',
+  close:    'M18 6L6 18M6 6l12 12',
+  settings: 'M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zm0 0v2m0-8V7m4.5 8.66.5.5M7 7.34l.5.5m9 .16-.5.5M7.5 16.16l.5-.5',
+  bookmark: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
+  bookmarkFill: 'M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z',
+  pen:      'M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7m-1.5-9.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z',
+  ai:       ['M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h2a5 5 0 0 1 5 5v1a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5v-1a5 5 0 0 1 5-5h2V5.73A2 2 0 0 1 12 2z', 'M9 12v2m6-2v2m-6-2h6'],
+  sparkle:  'M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364-.707.707M6.343 17.657l-.707.707m12.728 0-.707-.707M6.343 6.343l-.707-.707M12 7a5 5 0 1 0 0 10A5 5 0 0 0 12 7z',
+  wand:     'M15 4V2m0 14v-2M8 9H2m14 0h-2m-2.586-4.914L9.879 5.62M18.12 18.12l-1.535-1.536M8.464 18.12 6.929 16.586M18.12 5.88l-1.535 1.535M12 12h.01',
+  thought:  'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z',
+  play:     'M5 3l14 9-14 9V3z',
+  pause:    'M6 4h4v16H6zM14 4h4v16h-4z',
+  stop:     'M6 6h12v12H6z',
+  chevronL: 'M15 18l-6-6 6-6',
+  chevronR: 'M9 18l6-6-6-6',
+  note:     'M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8zm0 0v6h6M8 13h8M8 17h5',
+  pin:      'M12 2a7 7 0 0 1 7 7c0 5.25-7 13-7 13S5 14.25 5 9a7 7 0 0 1 7-7zm0 4a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
+}
+
+function Ic({ name, size=20, color='currentColor', sw=1.6 }) {
+  const d = IC[name]
+  if (!d) return null
+  const paths = Array.isArray(d) ? d : d.split('M').filter(Boolean).length > 1 && d.includes('z') 
+    ? [d] : d.split(/(?=M)/).filter(Boolean)
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none"
+      stroke={color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round"
+      style={{flexShrink:0,display:'block'}}>
+      {Array.isArray(d) 
+        ? d.map((p,i)=><path key={i} d={p}/>)
+        : <path d={d}/>}
+    </svg>
+  )
+}
+
 function Spinner({ size=15, color }) {
   return <div style={{width:size,height:size,border:`2px solid ${color}30`,borderTopColor:color,borderRadius:'50%',animation:'spin .7s linear infinite',flexShrink:0}}/>
 }
@@ -210,6 +311,10 @@ export default function App() {
   const [ttsProgress,    setTtsProgress]    = useState(0)
   const [toast,          setToast]          = useState('')
   const [scrollTrigger,  setScrollTrigger]  = useState(0)
+  const [showControls,   setShowControls]   = useState(false)  // immersive mode
+  const [showAiSheet,    setShowAiSheet]    = useState(false)  // AI bottom sheet
+  const [screen,         setScreen]         = useState('home') // 'home' | 'reading'
+  const [homeTab,        setHomeTab]        = useState('library') // 'library'|'notes'
 
   // ── Notes state ──────────────────────────────────────────────────────────────
   const [notes,       setNotes]       = useState(() => { try { return JSON.parse(localStorage.getItem(NOTES_KEY)||'[]') } catch { return [] } })
@@ -250,10 +355,15 @@ export default function App() {
   // ── Persist settings ──────────────────────────────────────────────────────────
   useEffect(() => { lsSave(STORAGE_KEY, settings) }, [settings])
 
-  // ── Auto-open sidebar on tablet ────────────────────────────────────────────────
+  // ── Close sidebar on orientation change ─────────────────────────────────────
   useEffect(() => {
-    if (!isMob) setSidebarOpen(true)
+    if (screen === 'reading') setSidebarOpen(false)
   }, [isMob])
+
+  // ── Close sidebar when going home ────────────────────────────────────────────
+  useEffect(() => {
+    if (screen === 'home') setSidebarOpen(false)
+  }, [screen])
 
   // ── Load library ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -295,40 +405,55 @@ export default function App() {
   useEffect(() => {
     let timer = null
 
+    const showPanelFromSelection = () => {
+      const sel = window.getSelection()
+      if (!sel || sel.isCollapsed || !sel.rangeCount) {
+        if (!selModeRef.current) setSelPanel(null)
+        return
+      }
+      const text = sel.toString().trim()
+      if (text.length < 2) { setSelPanel(null); return }
+      const reader = readerRef.current
+      if (!reader) { setSelPanel(null); return }
+      const range = sel.getRangeAt(0)
+      if (!reader.contains(range.commonAncestorContainer)) { setSelPanel(null); return }
+      const rect = range.getBoundingClientRect()
+      setSelPanel({ text, rectTop: rect.top, rectLeft: rect.left, rectWidth: rect.width, rectBottom: rect.bottom })
+      setSelMode('')
+      setSelInput('')
+      setSelAiReply('')
+    }
+
     const onSelChange = () => {
       clearTimeout(timer)
-      // If we're in input sub-mode (writing a thought / asking AI), leave the panel alone
       if (selModeRef.current) return
+      timer = setTimeout(showPanelFromSelection, 80)
+    }
 
-      timer = setTimeout(() => {
-        const sel = window.getSelection()
+    // Android: touchend on reader fires AFTER selection handles settle
+    const onTouchEnd = () => {
+      clearTimeout(timer)
+      if (selModeRef.current) return
+      timer = setTimeout(showPanelFromSelection, 150)
+    }
 
-        // No selection or collapsed → hide panel (but only if not in input mode)
-        if (!sel || sel.isCollapsed || !sel.rangeCount) {
-          if (!selModeRef.current) setSelPanel(null)
-          return
-        }
-
-        const text = sel.toString().trim()
-        if (text.length < 2) { setSelPanel(null); return }
-
-        // Only trigger for selections inside the reader
-        const reader = readerRef.current
-        if (!reader) { setSelPanel(null); return }
-        const range = sel.getRangeAt(0)
-        if (!reader.contains(range.commonAncestorContainer)) { setSelPanel(null); return }
-
-        // Capture bounding rect of the selection for panel positioning
-        const rect = range.getBoundingClientRect()
-        setSelPanel({ text, rectTop: rect.top, rectLeft: rect.left, rectWidth: rect.width })
-        setSelMode('')
-        setSelInput('')
-        setSelAiReply('')
-      }, 250) // debounce: wait for Android handle drag to settle
+    // Suppress Android system context menu so OUR panel shows instead
+    const onContextMenu = (e) => {
+      const reader = readerRef.current
+      if (reader && reader.contains(e.target)) e.preventDefault()
     }
 
     document.addEventListener('selectionchange', onSelChange)
-    return () => { document.removeEventListener('selectionchange', onSelChange); clearTimeout(timer) }
+    document.addEventListener('contextmenu', onContextMenu)
+    const reader = readerRef.current
+    if (reader) reader.addEventListener('touchend', onTouchEnd)
+
+    return () => {
+      document.removeEventListener('selectionchange', onSelChange)
+      document.removeEventListener('contextmenu', onContextMenu)
+      if (reader) reader.removeEventListener('touchend', onTouchEnd)
+      clearTimeout(timer)
+    }
   }, [])   // stable – no deps needed
 
   const closeSelPanel = useCallback(() => {
@@ -477,6 +602,23 @@ export default function App() {
 
   const ttsToggle = () => ttsPlaying ? ttsPause() : ttsPaused ? ttsResume() : ttsSpeak()
 
+  // ── Immersive tap handler ─────────────────────────────────────────────────────
+  const handleReaderTap = useCallback((e) => {
+    if (screen !== 'reading') return
+    const sel = window.getSelection()
+    if (sel && !sel.isCollapsed) return
+    if (e.target.closest('button,a,mark,select')) return
+    if (!book) return
+    const x = e.clientX, w = window.innerWidth
+    if (x < w * 0.25) {
+      if (chIdx > 0) goChapter(chIdx - 1)
+    } else if (x > w * 0.75) {
+      if (chIdx < totalCh - 1) goChapter(chIdx + 1)
+    } else {
+      setShowControls(p => !p)
+    }
+  }, [screen, book, chIdx, totalCh])
+
   // ── Book management ───────────────────────────────────────────────────────────
   const loadBook = useCallback(async meta => {
     let b = meta.chapters ? meta : await dbGet('books', meta.id)
@@ -488,6 +630,7 @@ export default function App() {
     if (saved.bookId === b.id) {
       setTimeout(() => { setChIdx(saved.chIdx||0); pendingScrollRef.current = saved.scrollPct||0 }, 50)
     }
+    setScreen('reading')
   }, [isMob])
 
   const handleFile = useCallback(async file => {
@@ -566,36 +709,38 @@ export default function App() {
   useEffect(() => { if (showStyleModal) loadSamples() }, [showStyleModal])
 
   // ── Render reader paragraphs with note highlights + TTS highlight ──────────────
-  // ttsCurrentPara: which paragraph index is currently being spoken
   const ttsCurrentPara = (ttsPlaying || ttsPaused) && ttsRef.current?.paraMap && ttsProgress >= 0
-    ? ttsRef.current.paraMap[ttsProgress]
-    : -1
+    ? ttsRef.current.paraMap[ttsProgress] : -1
 
   const renderParas = () => {
     let paraIdx = -1
     return displayText.split('\n').map((para, i) => {
       const trimmed = para.trim()
-      if (!trimmed) return <br key={i}/>
+      if (!trimmed) return null  // skip empty lines — spacing is handled by paragraph margin
+
       paraIdx++
-      const curPara = paraIdx  // capture for closure
+      const curPara = paraIdx
       const isSpeaking = curPara === ttsCurrentPara
 
-      // Note highlight matching
       const mn = notes.find(n => {
         if (n.bookId!==book?.id || n.chIdx!==chIdx || !n.paraText) return false
         const pt = n.paraText.split('\n').map(l=>l.trim()).find(l=>l.length>1) || n.paraText.trim()
         return pt.length > 1 && trimmed.includes(pt)
       })
 
+      // Book-style: small bottom margin, first-line indent
       const baseStyle = {
-        marginBottom:'1em',
+        margin: '0 0 0.85em 0',
+        textIndent: '1.8em',
+        lineHeight: 'inherit',
+        transition: 'background .25s',
+        borderRadius: 4,
         ...(isSpeaking ? {
-          background: t.accent+'18',
-          borderRadius: 6,
+          background: t.accent + '20',
+          textIndent: 0,
           padding: '2px 6px',
-          margin: '0 -6px 1em',
-          transition: 'background .3s',
-        } : {})
+          margin: '0 -6px 0.85em',
+        } : {}),
       }
 
       if (!mn) return <p key={i} data-para={curPara} style={baseStyle}>{trimmed}</p>
@@ -608,7 +753,7 @@ export default function App() {
           {hi > 0 && trimmed.slice(0, hi)}
           <mark style={{background:t.accent+'44',borderRadius:3,padding:'1px 0',borderBottom:`2px solid ${t.accent}`,color:'inherit'}}>
             {trimmed.slice(hi, hi+ht.length)}
-            {mn.thought && <span style={{fontSize:10,color:t.accent,marginLeft:3,opacity:.8}}>💭</span>}
+            {mn.thought && <span style={{fontSize:10,color:t.accent,marginLeft:3,opacity:.8}}><Ic name='thought' size={9} color={t.accent}/></span>}
           </mark>
           {hi+ht.length < trimmed.length && trimmed.slice(hi+ht.length)}
         </p>
@@ -616,11 +761,16 @@ export default function App() {
     })
   }
 
-  // ── Panel position: always above the selection midpoint, clamped to viewport ──
-  const panelPos = selPanel ? {
-    left: Math.max(8, Math.min(selPanel.rectLeft + selPanel.rectWidth/2 - 210, window.innerWidth - 428)),
-    top:  Math.max(8, selPanel.rectTop - 8),
-  } : null
+  // ── Panel position: above selection, but BELOW if near top of screen ──────────
+  const PANEL_H = 170
+  const panelPos = selPanel ? (() => {
+    const w     = Math.min(420, window.innerWidth - 16)
+    const left  = Math.max(8, Math.min(selPanel.rectLeft + selPanel.rectWidth/2 - w/2, window.innerWidth - w - 8))
+    const aboveY = selPanel.rectTop - 10  // top of panel if showing above (with translateY(-100%))
+    const belowY = selPanel.rectBottom != null ? selPanel.rectBottom + 10 : selPanel.rectTop + 30
+    const showBelow = aboveY - PANEL_H < 60  // not enough room above
+    return { left, top: showBelow ? belowY : aboveY, showBelow, w }
+  })() : null
 
   const btnBase = (active, small) => ({
     background: 'none',
@@ -645,69 +795,78 @@ export default function App() {
       onDrop={onDrop} onDragOver={e=>e.preventDefault()}
     >
 
-      {/* Mobile sidebar backdrop */}
-      {isMob && sidebarOpen && (
+      {/* Sidebar backdrop - reading mode only, all screen sizes */}
+      {screen==='reading' && sidebarOpen && (
         <div onClick={()=>setSidebarOpen(false)}
           style={{position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:99}}/>
       )}
 
       {/* ── Sidebar ── */}
       <aside style={{
-        width: isMob ? (sidebarOpen?'80vw':0) : (sidebarOpen?260:0),
-        minWidth: isMob ? 0 : (sidebarOpen?260:0),
+        // In reading mode: sidebar is always a fixed overlay, never takes up layout space
+        // In home mode: always hidden (width 0)
+        width: 0,
+        minWidth: 0,
         background: t.sidebar,
-        borderRight: sidebarOpen ? `1px solid ${t.border}` : 'none',
         display:'flex', flexDirection:'column', overflow:'hidden',
-        transition:'width .25s,min-width .25s', flexShrink:0,
-        ...(isMob && sidebarOpen ? {position:'fixed',left:0,top:0,bottom:0,zIndex:100,width:'80vw',boxShadow:'4px 0 20px rgba(0,0,0,.2)'} : {}),
+        flexShrink:0,
+        // Show as fixed overlay only when open in reading mode
+        ...(screen==='reading' && sidebarOpen ? {
+          position:'fixed', left:0, top:0, bottom:0, zIndex:100,
+          width: isMob ? '82vw' : '280px',
+          boxShadow:'24px 0 48px rgba(0,0,0,0.22)',
+          overflow:'hidden',
+        } : {}),
       }}>
         {/* Logo */}
-        <div style={{padding:'15px 14px 12px',borderBottom:`1px solid ${t.border}`,flexShrink:0,display:'flex',alignItems:'center',gap:9}}>
-          <div style={{width:32,height:32,borderRadius:8,background:t.accent,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:16,fontWeight:700}}>✦</div>
+        <div style={{padding:'20px 18px 16px',flexShrink:0,display:'flex',alignItems:'center',gap:10}}>
+          <div style={{width:34,height:34,borderRadius:10,background:t.accent,display:'flex',alignItems:'center',justifyContent:'center',color:'#fff',fontSize:16,fontWeight:700,flexShrink:0}}>✦</div>
           <div>
-            <div style={{fontSize:15,fontWeight:700,color:t.accent}}>奇阅魔方</div>
-            <div style={{fontSize:11,color:t.muted}}>AI 阅读助手</div>
+            <div style={{fontSize:15,fontWeight:700,color:t.text,letterSpacing:.3}}>奇阅魔方</div>
+            <div style={{fontSize:11,color:t.muted,marginTop:1}}>AI 阅读助手</div>
           </div>
         </div>
 
         {/* Upload */}
-        <div style={{padding:'10px 12px',borderBottom:`1px solid ${t.border}`,flexShrink:0}}>
+        <div style={{padding:'0 14px 16px',flexShrink:0}}>
           <button onClick={()=>fileInputRef.current?.click()} style={{
-            width:'100%',padding:'8px',background:t.accent,color:'#fff',border:'none',
-            borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+            width:'100%',padding:'11px',background:t.accent,color:'#fff',border:'none',
+            borderRadius:12,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',
+            letterSpacing:.3,
           }}>＋ 上传 EPUB</button>
         </div>
 
         {/* Book list */}
         {library.length > 0 && (
-          <div style={{padding:'8px 12px 4px',flexShrink:0,maxHeight:200,overflowY:'auto'}}>
-            <div style={{fontSize:11,color:t.muted,marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>书库</div>
+          <div style={{padding:'0 10px 12px',flexShrink:0,maxHeight:200,overflowY:'auto'}}>
+            <div style={{fontSize:10,color:t.muted,marginBottom:8,textTransform:'uppercase',
+              letterSpacing:1.5,paddingLeft:6}}>书库</div>
             {library.map(b => (
-              <div key={b.id} style={{display:'flex',alignItems:'center',gap:6,marginBottom:2}}>
-                <button onClick={()=>loadBook(b)} style={{
-                  flex:1,minWidth:0,textAlign:'left',padding:'6px 8px',
-                  background: book?.id===b.id ? t.accent+'22' : 'none',
-                  border: `1px solid ${book?.id===b.id?t.accent:t.border}`,
-                  borderRadius:6,cursor:'pointer',fontFamily:'inherit',
-                  color: book?.id===b.id ? t.accent : t.text,
-                }}>
-                  <div style={{fontSize:12,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{b.title}</div>
-                  <div style={{fontSize:10,color:t.muted}}>{b.author}</div>
-                </button>
-              </div>
+              <button key={b.id} onClick={()=>loadBook(b)} style={{
+                width:'100%',textAlign:'left',padding:'9px 10px',marginBottom:2,
+                background: book?.id===b.id ? t.accent+'18' : 'none',
+                border:'none',borderRadius:10,cursor:'pointer',fontFamily:'inherit',
+                display:'block',
+              }}>
+                <div style={{fontSize:13,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',
+                  whiteSpace:'nowrap',color:book?.id===b.id?t.accent:t.text}}>{b.title}</div>
+                <div style={{fontSize:11,color:t.muted,marginTop:1}}>{b.author}</div>
+              </button>
             ))}
           </div>
         )}
 
         {/* Sidebar tabs */}
         {book && (
-          <div style={{display:'flex',borderBottom:`1px solid ${t.border}`,flexShrink:0}}>
+          <div style={{display:'flex',padding:'0 14px',gap:4,flexShrink:0,marginBottom:4}}>
             {[['chapters','目录'],['notes','笔记']].map(([id,label]) => (
               <button key={id} onClick={()=>setSidebarTab(id)} style={{
-                flex:1,padding:'9px 4px',border:'none',background:'none',fontFamily:'inherit',
+                flex:1,padding:'8px 4px',border:'none',
+                background: sidebarTab===id ? t.accent+'18' : 'none',
+                borderRadius:9,fontFamily:'inherit',
                 color: sidebarTab===id ? t.accent : t.muted,
-                fontSize:13,fontWeight:sidebarTab===id?700:400,
-                borderBottom: sidebarTab===id ? `2px solid ${t.accent}` : 'none',cursor:'pointer',
+                fontSize:13,fontWeight:sidebarTab===id?700:400,cursor:'pointer',
+                transition:'all .18s',
               }}>{label}{id==='notes'&&notes.length>0?` (${notes.length})`:''}</button>
             ))}
           </div>
@@ -715,14 +874,14 @@ export default function App() {
 
         {/* Chapter list */}
         {book && sidebarTab==='chapters' && (
-          <div style={{flex:1,overflowY:'auto',padding:'6px 0'}}>
+          <div style={{flex:1,overflowY:'auto',padding:'4px 10px 20px'}}>
             {book.chapters.map((ch,i) => (
               <button key={i} onClick={()=>goChapter(i)} style={{
-                width:'100%',textAlign:'left',padding:'9px 14px',border:'none',fontFamily:'inherit',
-                background: i===chIdx ? t.accent+'22' : 'none',
+                width:'100%',textAlign:'left',padding:'10px 10px',border:'none',fontFamily:'inherit',
+                background: i===chIdx ? t.accent+'18' : 'none',
                 color: i===chIdx ? t.accent : t.text,
-                fontSize:13,cursor:'pointer',
-                borderLeft: i===chIdx ? `3px solid ${t.accent}` : '3px solid transparent',
+                fontSize:13,cursor:'pointer',borderRadius:9,marginBottom:1,
+                display:'block',transition:'background .15s',
               }}>{ch.title}</button>
             ))}
           </div>
@@ -762,78 +921,73 @@ export default function App() {
       </aside>
 
       {/* ── Main column ── */}
-      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0}}>
+      <div style={{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',minWidth:0,position:'relative'}}>
 
-        {/* ── Top bar ── */}
+        {/* ── Floating Top bar (immersive: hidden until tap) ── */}
         <div style={{
-          display:'flex',alignItems:'center',gap:6,
-          padding:`8px 10px`,
-          borderBottom:`1px solid ${t.border}`,
-          flexShrink:0,background:t.bg,overflow:'hidden',
+          position:'absolute',top:0,left:0,right:0,zIndex:100,
+          height:52,display:'flex',alignItems:'center',gap:6,padding:'0 10px',
+          background:`${t.bg}EE`,
+          backdropFilter:'blur(14px)',WebkitBackdropFilter:'blur(14px)',
+          boxShadow: screen==='reading' ? 'none' : '0 1px 0 rgba(0,0,0,0.04)',
+          opacity: (screen==='reading' && showControls) ? 1 : 0,
+          pointerEvents: (screen==='reading' && showControls) ? 'all' : 'none',
+          transition:'opacity .22s ease',
         }}>
-          <button onClick={()=>setSidebarOpen(o=>!o)} style={{...btnBase(false),fontSize:15,padding:'5px 9px'}}>
-            {sidebarOpen?'✕':'☰'}
-          </button>
-
-          {book && <>
-            <button onClick={()=>setShowStyleModal(true)} style={{...btnBase(!!style),color:style?t.accent:t.muted}}>
-              {style ? style.name : '风格'}
+          {/* Back / Menu toggle */}
+          {screen==='reading' && (
+            <button onClick={()=>{ setScreen('home'); setShowControls(false); setSidebarOpen(false) }} style={{
+              width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',
+              background:'none',border:'none',borderRadius:10,color:t.text,cursor:'pointer',flexShrink:0,
+            }}>
+              <Ic name='chevronL' size={22} color={t.text}/>
             </button>
+          )}
+          {screen==='home' && <div style={{width:40}}/>}
 
-            <button
-              disabled={rewriteLoading}
-              onClick={()=>{
-                if (!style)   { setShowStyleModal(true); return }
-                if (!curApiKey) { setShowSettings(true); return }
-                setPendingStyleId(style.id)
-                doRewrite(style.id)
-              }}
-              style={{
-                background: cachedRW ? t.accent : rewriteLoading ? t.hover : 'none',
-                border: `1px solid ${cachedRW?t.accent:t.border}`, borderRadius:7,
-                padding:'5px 9px', color: cachedRW?'#fff':rewriteLoading?t.muted:t.text,
-                fontSize:13, cursor:rewriteLoading?'wait':'pointer', flexShrink:0,
-                fontFamily:'inherit', display:'flex', alignItems:'center', gap:4,
+          {/* Chapter title - only in reading mode */}
+          <div style={{flex:1,minWidth:0,textAlign:'center',fontSize:13,color:t.muted,
+            overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+            {screen==='reading' ? (chapter?.title||'') : ''}
+          </div>
+
+          {/* Right: AI sheet + settings */}
+          <div style={{display:'flex',alignItems:'center',gap:4,flexShrink:0}}>
+            {screen==='reading' && book && (
+              <button onClick={()=>setShowAiSheet(true)} style={{
+                height:34,padding:'0 14px',display:'flex',alignItems:'center',gap:5,
+                background: (style||ttsPlaying||ttsPaused) ? t.accent+'20' : 'none',
+                border:`1px solid ${(style||ttsPlaying||ttsPaused)?t.accent:t.border}`,
+                borderRadius:17,color:(style||ttsPlaying||ttsPaused)?t.accent:t.muted,
+                fontSize:13,cursor:'pointer',fontFamily:'inherit',
               }}>
-              {rewriteLoading && <Spinner size={11} color={t.muted}/>}
-              {isMob ? (cachedRW?'重写':'改写') : (cachedRW?'↺ 重写':'✦ 改写')}
-            </button>
-
-            {(cachedRW||isRewriting) && ['original','rewritten'].map(m => (
-              <button key={m}
-                onClick={()=>{ if(m==='rewritten'&&!cachedRW)return; setViewMode(m); setStreamText('') }}
-                style={{...btnBase(viewMode===m,true),background:viewMode===m?t.accent+'22':'none'}}>
-                {m==='original'?'原文':'改写'}
+                {ttsPlaying ? <><Spinner size={11} color={t.accent}/><span style={{fontSize:13}}>朗读中</span></> :
+                 ttsPaused ? <><Ic name='pause' size={14} color={t.accent}/><span style={{fontSize:13}}>暂停</span></> :
+                 style ? <><Ic name='wand' size={14} color={t.accent}/><span style={{fontSize:13}}>{style.name}</span></> : <><Ic name='wand' size={14} color={t.muted}/><span style={{fontSize:13}}>AI</span></>}
               </button>
-            ))}
-
-            <button onClick={ttsToggle} style={{...btnBase(ttsPlaying||ttsPaused),fontSize:14}}>
-              {ttsPlaying?'⏸':'▶'}
-            </button>
-            {(ttsPlaying||ttsPaused) && <>
-              <button onClick={ttsStop} style={{...btnBase(false),fontSize:14}}>■</button>
-              <select value={ttsRate} onChange={e=>setTtsRate(+e.target.value)}
-                style={{padding:'4px',border:`1px solid ${t.border}`,borderRadius:6,background:t.card,color:t.text,fontSize:11,fontFamily:'inherit',flexShrink:0,cursor:'pointer'}}>
-                {[0.7,0.85,1.0,1.2,1.5].map(r=><option key={r} value={r}>{r}x</option>)}
-              </select>
-            </>}
-          </>}
-
-          <div style={{flex:1}}/>
-
-          <button onClick={()=>{ if(book){ setSidebarTab('notes'); setSidebarOpen(true) } }}
-            style={{...btnBase(false),fontSize:14,position:'relative'}}>
-            📝
-            {notes.length > 0 && (
-              <span style={{position:'absolute',top:-4,right:-4,background:t.accent,color:'#fff',borderRadius:'50%',width:14,height:14,fontSize:9,display:'flex',alignItems:'center',justifyContent:'center'}}>{notes.length}</span>
             )}
-          </button>
-          <button onClick={()=>setShowSettings(true)} style={{...btnBase(false),fontSize:14}}>⚙</button>
+            {screen==='reading' && <>
+            <button onClick={()=>{ if(book){ setSidebarTab('notes'); setSidebarOpen(true); setShowControls(false) } }} style={{
+              width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',
+              background:'none',border:'none',borderRadius:10,color:t.muted,fontSize:16,cursor:'pointer',position:'relative',
+            }}>
+              <Ic name='bookmark' size={20} color={t.muted}/>
+              {notes.length>0&&<span style={{position:'absolute',top:6,right:6,background:t.accent,color:'#fff',
+                borderRadius:'50%',width:14,height:14,fontSize:8,display:'flex',alignItems:'center',
+                justifyContent:'center',fontWeight:700}}>{notes.length}</span>}
+            </button>
+            <button onClick={()=>setShowSettings(true)} style={{
+              width:40,height:40,display:'flex',alignItems:'center',justifyContent:'center',
+              background:'none',border:'none',borderRadius:10,color:t.muted,cursor:'pointer',
+            }}><Ic name='settings' size={20} color={t.muted}/></button>
+            </>}
+          </div>
         </div>
 
         {/* ── Reader ── */}
         <div
           ref={readerRef}
+          onClick={handleReaderTap}
           onScroll={() => {
             if (book && readerRef.current) {
               const el = readerRef.current
@@ -844,45 +998,180 @@ export default function App() {
           style={{
             flex:1, overflowY:'auto',
             paddingBottom:'env(safe-area-inset-bottom)',
-            // Text is selectable here
             userSelect:'text', WebkitUserSelect:'text',
           }}
         >
-          {!book
-            ? <Welcome t={t} onUpload={()=>fileInputRef.current?.click()}/>
+          {screen === 'home'
+            ? <HomeScreen
+                t={t} library={library} notes={notes} book={book}
+                homeTab={homeTab} setHomeTab={setHomeTab}
+                onLoadBook={loadBook} onUpload={()=>fileInputRef.current?.click()}
+                onSettings={()=>setShowSettings(true)}
+                onDeleteBook={deleteBook}
+                readPos={JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')}
+                chIdx={chIdx}
+              />
             : (
-              <div style={{maxWidth:860,margin:'0 auto',padding:isMob?'20px 18px 60px':'44px 52px 60px'}}>
-                <h1 style={{fontSize:settings.fontSize+4,fontWeight:700,marginBottom:28,lineHeight:1.4,fontFamily:FONTS[settings.fontType]}}>
+              <div style={{maxWidth:660,margin:'0 auto',padding:isMob?'72px 28px 140px':'80px 10vw 140px'}}>
+                {/* Chapter title */}
+                <h1 style={{
+                  fontSize:settings.fontSize+2,fontWeight:600,marginBottom:32,lineHeight:1.3,
+                  fontFamily:FONTS[settings.fontType]||FONTS.lora,color:t.text,
+                  paddingBottom:20,
+                }}>
                   {chapter?.title}
                 </h1>
-                <div style={{fontSize:settings.fontSize,lineHeight:settings.lineHeight,fontFamily:FONTS[settings.fontType],wordBreak:'break-word'}}>
+                {/* Body text */}
+                <div style={{
+                  fontSize:settings.fontSize,lineHeight:settings.lineHeight,
+                  fontFamily:FONTS[settings.fontType]||FONTS.lora,color:t.text,
+                  wordBreak:'break-word',
+                  textAlign:'justify',textJustify:'inter-ideograph',
+                  WebkitFontSmoothing:'antialiased',
+                }}>
                   {renderParas()}
                   {isRewriting && <span style={{display:'inline-block',width:2,height:'1em',background:t.accent,marginLeft:2,verticalAlign:'text-bottom',animation:'blink .9s step-end infinite'}}/>}
-                </div>
-
-                {/* Chapter nav */}
-                <div style={{display:'flex',gap:10,marginTop:32,paddingTop:20,borderTop:`1px solid ${t.border}`,justifyContent:'space-between',alignItems:'center'}}>
-                  <button onClick={()=>chIdx>0&&goChapter(chIdx-1)} disabled={chIdx===0}
-                    style={{padding:'8px 16px',border:`1px solid ${t.border}`,borderRadius:8,background:'none',color:chIdx===0?t.muted:t.text,cursor:chIdx===0?'default':'pointer',fontSize:13,fontFamily:'inherit'}}>
-                    ← 上一章
-                  </button>
-                  <div style={{textAlign:'center',fontSize:11,color:t.muted,lineHeight:1.8}}>
-                    <div>第 {chIdx+1} 章 / 共 {totalCh} 章</div>
-                    <div>{wordCount.toLocaleString()} 字 · 约 {readTime} 分钟</div>
-                    <div style={{height:3,background:t.border,borderRadius:2,width:100,margin:'4px auto 0',overflow:'hidden'}}>
-                      <div style={{height:'100%',background:t.accent,width:`${totalCh>1?(chIdx/(totalCh-1))*100:100}%`,transition:'width .3s'}}/>
-                    </div>
-                  </div>
-                  <button onClick={()=>chIdx<totalCh-1&&goChapter(chIdx+1)} disabled={chIdx===totalCh-1}
-                    style={{padding:'8px 16px',border:`1px solid ${t.border}`,borderRadius:8,background:'none',color:chIdx===totalCh-1?t.muted:t.text,cursor:chIdx===totalCh-1?'default':'pointer',fontSize:13,fontFamily:'inherit'}}>
-                    下一章 →
-                  </button>
                 </div>
               </div>
             )
           }
         </div>
+
+        {/* ── Tiny immersive hint: only in reading mode ── */}
+        {screen==='reading' && book && !showControls && (
+          <div style={{
+            position:'absolute',bottom:0,left:0,right:0,
+            paddingBottom:'calc(10px + env(safe-area-inset-bottom))',
+            textAlign:'center',pointerEvents:'none',zIndex:10,
+          }}>
+            <span style={{fontSize:10,color:t.muted,opacity:0.45,
+              fontFamily:FONTS.inter,letterSpacing:0.8}}>
+              {chIdx+1} / {totalCh}
+            </span>
+          </div>
+        )}
+
+        {/* ── Floating Bottom bar (immersive: hidden until tap) ── */}
+        {screen==='reading' && book && (
+          <div style={{
+            position:'absolute',bottom:0,left:0,right:0,zIndex:100,
+            padding:'14px 24px',
+            paddingBottom:`calc(14px + env(safe-area-inset-bottom))`,
+            background:`${t.bg}EE`,
+            backdropFilter:'blur(14px)',WebkitBackdropFilter:'blur(14px)',
+            boxShadow:'0 -1px 0 rgba(0,0,0,0.05)',
+            opacity: showControls ? 1 : 0,
+            pointerEvents: showControls ? 'all' : 'none',
+            transition:'opacity .22s ease',
+          }}>
+            {/* Chapter progress slider */}
+            <div style={{display:'flex',alignItems:'center',gap:12}}>
+              <span style={{fontSize:11,color:t.muted,flexShrink:0}}>第{chIdx+1}章</span>
+              <input type="range" min={0} max={Math.max(0,totalCh-1)} value={chIdx}
+                onChange={e=>goChapter(Number(e.target.value))}
+                style={{flex:1,accentColor:t.accent,cursor:'pointer',height:2}}/>
+              <span style={{fontSize:11,color:t.muted,flexShrink:0}}>共{totalCh}章</span>
+            </div>
+            <div style={{textAlign:'center',fontSize:11,color:t.muted,marginTop:6,opacity:.7}}>
+              {wordCount.toLocaleString()} 字 · 约 {readTime} 分钟 · 点击中间区域收起
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* ══ AI BOTTOM SHEET ══════════════════════════════════════════════════════ */}
+      {showAiSheet && (
+        <div onClick={()=>setShowAiSheet(false)} style={{
+          position:'fixed',inset:0,background:'rgba(0,0,0,0.4)',zIndex:300,
+          display:'flex',alignItems:'flex-end',
+        }}>
+          <div onClick={e=>e.stopPropagation()} style={{
+            width:'100%',
+            background: t.id==='night' ? '#1e1e28' : t.bg,
+            borderRadius:'22px 22px 0 0',
+            padding:'16px 20px calc(28px + env(safe-area-inset-bottom))',
+            boxShadow:'0 -2px 60px rgba(0,0,0,0.22)',
+            maxHeight:'80vh',overflowY:'auto',
+          }}>
+            <div style={{width:32,height:3,background:t.muted+'50',borderRadius:2,margin:'0 auto 22px'}}/>
+
+            {/* TTS */}
+            <div style={{marginBottom:24}}>
+              <div style={{fontSize:11,color:t.muted,letterSpacing:1.5,marginBottom:12,
+                textTransform:'uppercase',fontFamily:FONTS.inter}}>朗读</div>
+              <div style={{display:'flex',gap:10,alignItems:'center'}}>
+                <button onClick={ttsToggle} style={{
+                  height:50,flex:1,display:'flex',alignItems:'center',justifyContent:'center',gap:10,
+                  background: t.id==='night' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                  border:'none',borderRadius:14,
+                  fontSize:15,cursor:'pointer',fontFamily:'inherit',fontWeight:600,color:t.text,
+                }}>
+                  {ttsPlaying ? <Ic name='pause' size={18} color={t.accent}/> : <Ic name='play' size={18} color={t.accent}/>}
+                  {ttsPlaying?'暂停朗读':ttsPaused?'继续朗读':'开始朗读'}
+                </button>
+                {(ttsPlaying||ttsPaused) && (
+                  <button onClick={ttsStop} style={{
+                    width:50,height:50,display:'flex',alignItems:'center',justifyContent:'center',
+                    background: t.id==='night' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                    border:'none',borderRadius:14,color:t.muted,fontSize:15,cursor:'pointer',
+                  }}><Ic name='stop' size={16} color={t.muted}/></button>
+                )}
+                <select value={ttsRate} onChange={e=>setTtsRate(+e.target.value)} style={{
+                  height:50,padding:'0 12px',
+                  background: t.id==='night' ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)',
+                  border:'none',borderRadius:14,
+                  color:t.text,fontSize:13,fontFamily:'inherit',cursor:'pointer',
+                }}>
+                  {[0.7,0.85,1.0,1.2,1.5].map(r=><option key={r} value={r}>{r}x</option>)}
+                </select>
+              </div>
+            </div>
+
+            {/* Rewrite */}
+            <div style={{marginBottom:8}}>
+              <div style={{fontSize:11,color:t.muted,letterSpacing:1.5,marginBottom:12,
+                textTransform:'uppercase',fontFamily:FONTS.inter}}>AI 改写风格</div>
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:10}}>
+                {STYLES.map(st => (
+                  <button key={st.id}
+                    onClick={()=>{ if(!curApiKey){setShowAiSheet(false);setShowSettings(true);return;} setStyle(st); doRewrite(st.id); setShowAiSheet(false) }}
+                    style={{
+                      height:64,padding:'0 16px',
+                      display:'flex',flexDirection:'column',alignItems:'flex-start',justifyContent:'center',
+                      background: style?.id===st.id ? t.accent : (t.id==='night'?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.04)'),
+                      border:'none',borderRadius:16,cursor:'pointer',fontFamily:'inherit',
+                      boxShadow: style?.id===st.id ? `0 4px 14px ${t.accent}40` : 'none',
+                      transition:'all .2s ease',
+                    }}>
+                    <div style={{fontSize:14,fontWeight:600,marginBottom:3,
+                      color:style?.id===st.id?'#fff':t.text}}>{st.name}</div>
+                    <div style={{fontSize:11,
+                      color:style?.id===st.id?'rgba(255,255,255,0.75)':t.muted}}>{st.desc}</div>
+                  </button>
+                ))}
+              </div>
+              {cachedRW && (
+                <div style={{
+                  display:'flex',marginTop:12,
+                  background: t.id==='night' ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.04)',
+                  borderRadius:14,overflow:'hidden',padding:3,gap:3,
+                }}>
+                  {['original','rewritten'].map(m=>(
+                    <button key={m} onClick={()=>{setViewMode(m);setStreamText('');setShowAiSheet(false)}} style={{
+                      flex:1,height:38,border:'none',
+                      background:viewMode===m ? (t.id==='night'?'rgba(255,255,255,0.12)':t.card) : 'none',
+                      borderRadius:11,color:viewMode===m?t.text:t.muted,
+                      fontSize:13,cursor:'pointer',fontFamily:'inherit',fontWeight:viewMode===m?600:400,
+                      boxShadow:viewMode===m?'0 1px 4px rgba(0,0,0,0.1)':'none',
+                      transition:'all .18s',
+                    }}>{m==='original'?'原文':'改写版'}</button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ══ SELECTION PANEL ══════════════════════════════════════════════════════
           Architecture:
@@ -905,42 +1194,40 @@ export default function App() {
               position:'absolute',
               left: panelPos.left,
               top: panelPos.top,
-              transform: 'translateY(-100%)',
-              width: Math.min(420, window.innerWidth-16),
-              background: t.card,
-              border: `1px solid ${t.border}`,
-              borderRadius: 16,
-              padding: '12px 14px',
-              boxShadow: '0 8px 32px rgba(0,0,0,.28)',
-              pointerEvents: 'all',      // only the card captures events
-              userSelect: 'none',         // panel text is NEVER selectable
+              transform: panelPos.showBelow ? 'none' : 'translateY(-100%) translateY(-10px)',
+              width: panelPos.w,
+              background: t.id==='night' ? '#2a2a38' : 'rgba(30,28,36,0.97)',
+              borderRadius: 14,
+              padding: '10px 12px',
+              boxShadow: '0 4px 24px rgba(0,0,0,.38)',
+              pointerEvents: 'all',
+              userSelect: 'none',
               WebkitUserSelect: 'none',
             }}
-            // ↓ THE CRITICAL FIX: prevents the browser from collapsing/moving the
-            //   text selection when the user taps a panel button on Android/iOS.
             onPointerDown={e => { e.preventDefault(); e.stopPropagation() }}
           >
             {/* Selected text preview */}
-            <div style={{fontSize:12,color:t.muted,marginBottom:10,borderLeft:`3px solid ${t.accent}`,paddingLeft:8,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
-              {selPanel.text.slice(0,60)}{selPanel.text.length>60?'…':''}
+            <div style={{fontSize:11,color:'rgba(255,255,255,0.5)',marginBottom:9,paddingBottom:8,borderBottom:'1px solid rgba(255,255,255,0.12)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontFamily:FONTS.lora}}>
+              {selPanel.text.slice(0,72)}{selPanel.text.length>72?'…':''}
             </div>
             <button
               onPointerDown={e=>{e.preventDefault();e.stopPropagation()}}
               onClick={closeSelPanel}
-              style={{position:'absolute',top:8,right:10,background:'none',border:'none',color:t.muted,fontSize:20,cursor:'pointer',lineHeight:1,padding:0}}>×</button>
+              style={{position:'absolute',top:8,right:10,background:'none',border:'none',color:'rgba(255,255,255,0.4)',fontSize:18,cursor:'pointer',lineHeight:1,padding:'2px 4px'}}>×</button>
 
             {/* Default: 3 action buttons */}
             {!selMode && (
-              <div style={{display:'flex',gap:8}}>
+              <div style={{display:'flex',gap:6}}>
                 {[
-                  ['📝 加入笔记', t.accent, '#fff', () => { addNote(selPanel.text,'',selPanel.text); closeSelPanel() }],
-                  ['💭 想法',     t.card,   t.text, () => { setSelMode('thought'); setSelInput('') }],
-                  ['🤖 问AI',     t.card,   t.text, () => { setSelMode('askai'); setSelInput(''); setSelAiReply('') }],
-                ].map(([label,bg,color,fn]) => (
+                  [null, '笔记', t.accent, '#fff', () => { addNote(selPanel.text,'',selPanel.text); closeSelPanel() }, 'pin'],
+                  [null, '想法', 'rgba(255,255,255,0.1)', 'rgba(255,255,255,0.9)', () => { setSelMode('thought'); setSelInput('') }, 'thought'],
+                  [null, '问AI', 'rgba(255,255,255,0.1)', 'rgba(255,255,255,0.9)', () => { setSelMode('askai'); setSelInput(''); setSelAiReply('') }, 'sparkle'],
+                ].map(([_,label,bg,color,fn,icon]) => (
                   <button key={label}
                     onPointerDown={e=>{e.preventDefault();e.stopPropagation()}}
                     onClick={fn}
-                    style={{flex:1,padding:'9px 4px',background:bg,border:`1px solid ${bg===t.card?t.border:'transparent'}`,borderRadius:10,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit',color}}>
+                    style={{flex:1,padding:'10px 4px',background:bg,border:'none',borderRadius:10,fontSize:12,fontWeight:600,cursor:'pointer',fontFamily:'inherit',color,display:'flex',flexDirection:'column',alignItems:'center',gap:5}}>
+                    {icon && <Ic name={icon} size={17} color={color}/>}
                     {label}
                   </button>
                 ))}
@@ -953,11 +1240,11 @@ export default function App() {
                 <textarea value={selInput} onChange={e=>setSelInput(e.target.value)}
                   placeholder="写下你的想法…" autoFocus
                   // textarea itself must remain selectable/editable
-                  style={{width:'100%',height:80,padding:'8px',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,fontFamily:'inherit',background:t.bg,color:t.text,resize:'none',boxSizing:'border-box',outline:'none',display:'block',userSelect:'text',WebkitUserSelect:'text'}}
+                  style={{width:'100%',height:80,padding:'10px 12px',border:'none',borderRadius:10,fontSize:13,fontFamily:'inherit',background:'rgba(255,255,255,0.12)',color:'#fff',resize:'none',boxSizing:'border-box',outline:'none',display:'block',userSelect:'text',WebkitUserSelect:'text'}}
                 />
                 <div style={{display:'flex',gap:8,marginTop:8}}>
                   <button onPointerDown={e=>{e.preventDefault()}} onClick={()=>setSelMode('')}
-                    style={{flex:1,padding:'8px',background:'none',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:t.text}}>取消</button>
+                    style={{flex:1,padding:'8px',background:'rgba(255,255,255,0.08)',border:'none',borderRadius:10,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:'rgba(255,255,255,0.6)'}}>取消</button>
                   <button onPointerDown={e=>{e.preventDefault()}} onClick={()=>{ addNote(selPanel.text,selInput,selPanel.text); closeSelPanel() }}
                     style={{flex:2,padding:'8px',background:t.accent,color:'#fff',border:'none',borderRadius:8,fontSize:13,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>保存想法</button>
                 </div>
@@ -969,11 +1256,11 @@ export default function App() {
               <div>
                 <textarea value={selInput} onChange={e=>setSelInput(e.target.value)}
                   placeholder="对这段文字有什么问题？" autoFocus
-                  style={{width:'100%',height:70,padding:'8px',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,fontFamily:'inherit',background:t.bg,color:t.text,resize:'none',boxSizing:'border-box',outline:'none',display:'block',userSelect:'text',WebkitUserSelect:'text'}}
+                  style={{width:'100%',height:70,padding:'10px 12px',border:'none',borderRadius:10,fontSize:13,fontFamily:'inherit',background:'rgba(255,255,255,0.12)',color:'#fff',resize:'none',boxSizing:'border-box',outline:'none',display:'block',userSelect:'text',WebkitUserSelect:'text'}}
                 />
                 <div style={{display:'flex',gap:8,marginTop:8}}>
                   <button onPointerDown={e=>e.preventDefault()} onClick={()=>setSelMode('')}
-                    style={{flex:1,padding:'8px',background:'none',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:t.text}}>取消</button>
+                    style={{flex:1,padding:'8px',background:'rgba(255,255,255,0.08)',border:'none',borderRadius:10,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:'rgba(255,255,255,0.6)'}}>取消</button>
                   <button
                     disabled={!selInput.trim()||selAiLoading}
                     onPointerDown={e=>e.preventDefault()}
@@ -996,16 +1283,16 @@ export default function App() {
             {/* Ask AI — reply */}
             {selMode==='askai' && selAiReply && (
               <div>
-                <div style={{background:t.hover,borderRadius:8,padding:'10px 12px',fontSize:13,lineHeight:1.8,color:t.text,maxHeight:180,overflowY:'auto',userSelect:'text',WebkitUserSelect:'text'}}>
+                <div style={{background:'rgba(255,255,255,0.1)',borderRadius:10,padding:'10px 12px',fontSize:13,lineHeight:1.8,color:'rgba(255,255,255,0.9)',maxHeight:180,overflowY:'auto',userSelect:'text',WebkitUserSelect:'text'}}>
                   {selAiReply}
                 </div>
                 <div style={{display:'flex',gap:8,marginTop:8}}>
                   <button onPointerDown={e=>e.preventDefault()} onClick={()=>{setSelAiReply('');setSelInput('')}}
-                    style={{flex:1,padding:'8px',background:'none',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:t.text}}>重问</button>
+                    style={{flex:1,padding:'8px',background:'rgba(255,255,255,0.08)',border:'none',borderRadius:10,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:'rgba(255,255,255,0.6)'}}>重问</button>
                   <button onPointerDown={e=>e.preventDefault()} onClick={()=>{ addNote(selPanel.text,`问：${selInput}\nAI：${selAiReply}`,selPanel.text); closeSelPanel() }}
-                    style={{flex:1,padding:'8px',background:'none',border:`1px solid ${t.accent}`,borderRadius:8,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:t.accent}}>存笔记</button>
+                    style={{flex:1,padding:'8px',background:t.accent+'30',border:'none',borderRadius:10,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:t.accent,fontWeight:600}}>存笔记</button>
                   <button onPointerDown={e=>e.preventDefault()} onClick={closeSelPanel}
-                    style={{flex:1,padding:'8px',background:'none',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:t.text}}>关闭</button>
+                    style={{flex:1,padding:'8px',background:'rgba(255,255,255,0.08)',border:'none',borderRadius:10,fontSize:13,cursor:'pointer',fontFamily:'inherit',color:'rgba(255,255,255,0.6)'}}>关闭</button>
                 </div>
               </div>
             )}
@@ -1043,11 +1330,11 @@ export default function App() {
       {thoughtModal && (
         <Overlay onClick={()=>setThoughtModal(null)}>
           <div onClick={e=>e.stopPropagation()} style={{background:t.bg,borderRadius:16,padding:'24px',width:'88vw',maxWidth:420,boxShadow:'0 20px 60px rgba(0,0,0,.25)'}}>
-            <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:12}}>💭 我的想法</div>
+            <div style={{fontSize:16,fontWeight:700,color:t.text,marginBottom:12,display:'flex',alignItems:'center',gap:8}}><Ic name='thought' size={18} color={t.accent}/>我的想法</div>
             <textarea value={thoughtInput} onChange={e=>setThoughtInput(e.target.value)} placeholder="写下你的想法…"
-              style={{width:'100%',height:120,padding:'10px',border:`1px solid ${t.border}`,borderRadius:8,fontSize:14,fontFamily:'inherit',background:t.card,color:t.text,resize:'none',boxSizing:'border-box',outline:'none',lineHeight:1.7}}/>
+              style={{width:'100%',height:120,padding:'12px 14px',border:'none',borderRadius:12,fontSize:14,fontFamily:'inherit',background:t.hover,color:t.text,resize:'none',boxSizing:'border-box',outline:'none',lineHeight:1.7}}/>
             <div style={{display:'flex',gap:10,marginTop:12}}>
-              <button onClick={()=>setThoughtModal(null)} style={{flex:1,padding:'10px',background:'none',border:`1px solid ${t.border}`,borderRadius:8,fontSize:14,cursor:'pointer',fontFamily:'inherit',color:t.text}}>取消</button>
+              <button onClick={()=>setThoughtModal(null)} style={{flex:1,padding:'12px',background:t.hover,border:'none',borderRadius:12,fontSize:14,cursor:'pointer',fontFamily:'inherit',color:t.muted}}>取消</button>
               <button onClick={()=>{ updateThought(thoughtModal.noteId,thoughtInput); setThoughtModal(null) }}
                 style={{flex:2,padding:'10px',background:t.accent,color:'#fff',border:'none',borderRadius:8,fontSize:14,fontWeight:600,cursor:'pointer',fontFamily:'inherit'}}>保存</button>
             </div>
@@ -1059,19 +1346,19 @@ export default function App() {
       {showSettings && (
         <Overlay onClick={()=>setShowSettings(false)}>
           <div onClick={e=>e.stopPropagation()} style={{background:t.bg,borderRadius:16,padding:'24px',width:'90vw',maxWidth:480,maxHeight:'88vh',overflowY:'auto',boxShadow:'0 20px 60px rgba(0,0,0,.3)'}}>
-            <div style={{fontSize:17,fontWeight:700,marginBottom:18,color:t.text}}>⚙ 设置</div>
+            <div style={{fontSize:17,fontWeight:700,marginBottom:20,color:t.text,display:'flex',alignItems:'center',gap:8}}><Ic name='settings' size={20} color={t.accent}/>设置</div>
 
             <SRow label="AI 模型">
               <div style={{display:'flex',gap:6,flexWrap:'wrap',marginBottom:8}}>
                 {PROVIDERS.map(p => (
                   <button key={p.id} onClick={()=>setSettings(s=>({...s,provider:p.id,model:p.models[0].id}))}
-                    style={{padding:'5px 12px',borderRadius:20,fontSize:12,fontFamily:'inherit',cursor:'pointer',border:`2px solid ${settings.provider===p.id?t.accent:t.border}`,background:settings.provider===p.id?t.accent+'18':'transparent',color:settings.provider===p.id?t.accent:t.muted}}>
+                    style={{padding:'6px 14px',borderRadius:20,fontSize:12,fontFamily:'inherit',cursor:'pointer',border:'none',background:settings.provider===p.id?t.accent+'22':t.hover,color:settings.provider===p.id?t.accent:t.muted,transition:'all .18s'}}>
                     {p.name}
                   </button>
                 ))}
               </div>
               <select value={settings.model} onChange={e=>setSettings(s=>({...s,model:e.target.value}))}
-                style={{width:'100%',padding:'7px 10px',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,fontFamily:'inherit',background:t.card,color:t.text,outline:'none',cursor:'pointer'}}>
+                style={{width:'100%',padding:'10px 12px',border:'none',borderRadius:11,fontSize:13,fontFamily:'inherit',background:t.hover,color:t.text,outline:'none',cursor:'pointer'}}>
                 {curProvider.models.map(m=><option key={m.id} value={m.id}>{m.name}</option>)}
               </select>
             </SRow>
@@ -1080,14 +1367,14 @@ export default function App() {
               <input type="password" value={settings.apiKeys?.[settings.provider]||''}
                 onChange={e=>setSettings(s=>({...s,apiKeys:{...(s.apiKeys||{}),[s.provider]:e.target.value}}))}
                 placeholder={settings.provider==='claude'?'sk-ant-api03-...':settings.provider==='zhipu'?'智谱 API Key':settings.provider==='qwen'?'sk-…（阿里云）':'Gemini API Key'}
-                style={{width:'100%',padding:'8px 11px',border:`1px solid ${t.border}`,borderRadius:8,fontSize:13,fontFamily:'inherit',background:t.card,color:t.text,outline:'none',boxSizing:'border-box'}}/>
+                style={{width:'100%',padding:'11px 14px',border:'none',borderRadius:11,fontSize:13,fontFamily:'inherit',background:t.hover,color:t.text,outline:'none',boxSizing:'border-box'}}/>
             </SRow>
 
             {/* Reading preview */}
-            <div style={{borderRadius:10,border:`1px solid ${t.border}`,padding:'12px 16px',marginBottom:16}}>
-              <div style={{fontSize:10,color:t.muted,marginBottom:6,textTransform:'uppercase',letterSpacing:1}}>预览</div>
-              <div style={{fontSize:settings.fontSize,lineHeight:settings.lineHeight,fontFamily:FONTS[settings.fontType],color:t.text}}>
-                在远东某处，有一座城市，它的名字几乎被人遗忘。那里的街道弯弯曲曲，像是一首没有写完的诗。
+            <div style={{borderRadius:12,background:t.hover,padding:'14px 18px',marginBottom:16}}>
+              <div style={{fontSize:10,color:t.muted,marginBottom:8,textTransform:'uppercase',letterSpacing:1}}>预览</div>
+              <div style={{fontSize:settings.fontSize,lineHeight:settings.lineHeight,fontFamily:FONTS[settings.fontType]||FONTS.lora,color:t.text}}>
+                在远东某处，有一座城市。The quick brown fox jumps over the lazy dog.
               </div>
             </div>
 
@@ -1095,7 +1382,7 @@ export default function App() {
               <div style={{display:'flex',flexWrap:'wrap',gap:7}}>
                 {BG_THEMES.map(th=>(
                   <button key={th.id} onClick={()=>setSettings(s=>({...s,bgTheme:th.id}))}
-                    style={{padding:'5px 12px',borderRadius:20,fontSize:12,fontFamily:'inherit',cursor:'pointer',border:`2px solid ${settings.bgTheme===th.id?t.accent:t.border}`,background:th.bg,color:th.text,boxShadow:settings.bgTheme===th.id?`0 0 0 2px ${t.accent}50`:'none'}}>
+                    style={{padding:'7px 14px',borderRadius:20,fontSize:12,fontFamily:'inherit',cursor:'pointer',border:'none',background:th.bg,color:th.text,boxShadow:settings.bgTheme===th.id?`0 0 0 3px ${t.accent}` :'0 1px 3px rgba(0,0,0,0.12)',transition:'all .18s'}}>
                     {th.label}
                   </button>
                 ))}
@@ -1103,7 +1390,7 @@ export default function App() {
             </SRow>
 
             <SRow label={<>字号 <b style={{color:t.accent}}>{settings.fontSize}px</b></>}>
-              <input type="range" min={14} max={26} value={settings.fontSize} onChange={e=>setSettings(s=>({...s,fontSize:+e.target.value}))} style={{width:'100%'}}/>
+              <input type="range" min={15} max={28} value={settings.fontSize} onChange={e=>setSettings(s=>({...s,fontSize:+e.target.value}))} style={{width:'100%'}}/>
             </SRow>
 
             <SRow label={<>行距 <b style={{color:t.accent}}>{settings.lineHeight.toFixed(1)}</b></>}>
@@ -1111,11 +1398,20 @@ export default function App() {
             </SRow>
 
             <SRow label="字体">
-              <div style={{display:'flex',gap:6}}>
-                {[['serif','衬线体（宋）'],['sans','黑体（无衬线）']].map(([id,label])=>(
+              <div style={{display:'flex',flexDirection:'column',gap:6}}>
+                {FONT_OPTIONS.map(({id,label,sub,sample})=>(
                   <button key={id} onClick={()=>setSettings(s=>({...s,fontType:id}))}
-                    style={{flex:1,padding:'7px 4px',fontSize:12,borderRadius:7,fontFamily:'inherit',cursor:'pointer',border:`1px solid ${settings.fontType===id?t.accent:t.border}`,background:settings.fontType===id?t.accent+'18':'transparent',color:settings.fontType===id?t.accent:t.muted}}>
-                    {label}
+                    style={{
+                      padding:'12px 14px',borderRadius:12,fontFamily:'inherit',cursor:'pointer',border:'none',
+                      background:settings.fontType===id?t.accent+'22':t.hover,
+                      display:'flex',alignItems:'center',justifyContent:'space-between',
+                      transition:'all .18s',
+                    }}>
+                    <div style={{display:'flex',flexDirection:'column',alignItems:'flex-start',gap:2}}>
+                      <span style={{fontSize:13,fontWeight:600,color:settings.fontType===id?t.accent:t.text,fontFamily:FONTS[id]}}>{label}</span>
+                      <span style={{fontSize:10,color:t.muted}}>{sub}</span>
+                    </div>
+                    <span style={{fontSize:14,color:settings.fontType===id?t.accent:t.muted,fontFamily:FONTS[id],opacity:.8}}>{sample}</span>
                   </button>
                 ))}
               </div>
@@ -1123,14 +1419,14 @@ export default function App() {
 
             {library.length > 0 && (
               <SRow label="书籍管理">
-                <div style={{border:`1px solid ${t.border}`,borderRadius:8,overflow:'hidden',maxHeight:160,overflowY:'auto'}}>
+                <div style={{borderRadius:12,overflow:'hidden',maxHeight:160,overflowY:'auto',background:t.hover}}>
                   {library.map(b=>(
-                    <div key={b.id} style={{display:'flex',alignItems:'center',gap:10,padding:'8px 12px',borderBottom:`1px solid ${t.border}`}}>
+                    <div key={b.id} style={{display:'flex',alignItems:'center',gap:10,padding:'10px 14px',marginBottom:2}}>
                       <div style={{flex:1,minWidth:0}}>
                         <div style={{fontSize:12,fontWeight:600,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',color:t.text}}>{b.title}</div>
                         <div style={{fontSize:11,color:t.muted}}>{b.author}</div>
                       </div>
-                      <button onClick={()=>deleteBook(b.id)} style={{padding:'3px 9px',border:`1px solid ${t.border}`,borderRadius:5,background:'none',color:'#e05555',fontSize:12,cursor:'pointer'}}>删除</button>
+                      <button onClick={()=>deleteBook(b.id)} style={{padding:'4px 10px',border:'none',borderRadius:8,background:'rgba(224,85,85,0.12)',color:'#e05555',fontSize:12,cursor:'pointer'}}>删除</button>
                     </div>
                   ))}
                 </div>
@@ -1173,12 +1469,15 @@ export default function App() {
         onChange={e=>{ const f=e.target.files?.[0]; if(f) handleFile(f); e.target.value='' }}/>
 
       <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400;0,500;0,600;1,400;1,500&family=Merriweather:ital,wght@0,300;0,400;0,700;1,300&family=Noto+Serif+SC:wght@300;400;500&family=Noto+Sans+SC:wght@300;400;500&family=Inter:wght@300;400;500;600&display=swap');
         @keyframes spin  { to { transform: rotate(360deg) } }
         @keyframes blink { 50% { opacity: 0 } }
         * { box-sizing: border-box }
         ::-webkit-scrollbar { width: 4px }
         ::-webkit-scrollbar-track { background: transparent }
         ::-webkit-scrollbar-thumb { background: rgba(128,128,128,.3); border-radius: 2px }
+        /* Better text rendering for reading */
+        p { text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
       `}</style>
     </div>
   )
@@ -1216,7 +1515,7 @@ function NoteItem({ n, t, onDelete, onNavigate, onShare, onThought }) {
       {menuOpen && (
         <div style={{position:'fixed',top:menuPos.top,left:menuPos.left,zIndex:301,background:t.card,border:`1px solid ${t.border}`,borderRadius:12,overflow:'hidden',boxShadow:'0 8px 24px rgba(0,0,0,.22)',minWidth:170}}>
           {[
-            ['💭', n.thought?'修改想法':'添加想法', ()=>{setMenuOpen(false);onThought()},  false],
+            ['✎', n.thought?'修改想法':'添加想法', ()=>{setMenuOpen(false);onThought()},  false],
             ['📤', '分享',                          ()=>{setMenuOpen(false);onShare()},   false],
             ['📖', '跳转到书中',                     ()=>{setMenuOpen(false);onNavigate()},false],
             ['🗑', '删除笔记',                       ()=>{setMenuOpen(false);onDelete()},  true ],
@@ -1238,7 +1537,7 @@ function NoteItem({ n, t, onDelete, onNavigate, onShare, onThought }) {
         <div style={{fontSize:14,lineHeight:1.8,color:t.text}}>{n.text}</div>
         {n.thought && (
           <div style={{marginTop:8,fontSize:13,color:t.accent,background:t.accent+'15',borderRadius:8,padding:'6px 10px',lineHeight:1.7,fontStyle:'italic'}}>
-            💭 {n.thought}
+            {n.thought}
           </div>
         )}
       </div>
@@ -1246,7 +1545,241 @@ function NoteItem({ n, t, onDelete, onNavigate, onShare, onThought }) {
   )
 }
 
-// ─── Welcome screen ───────────────────────────────────────────────────────────
+// ─── Cover color palettes for books without covers ────────────────────────────
+const COVER_PALETTES = [
+  { bg:'linear-gradient(145deg,#dce4d1,#b8c8a0)', text:'#2c3520' },
+  { bg:'linear-gradient(145deg,#e6d4d8,#c9acb4)', text:'#3a2028' },
+  { bg:'linear-gradient(145deg,#d1d8e6,#aab8d1)', text:'#1e2b40' },
+  { bg:'linear-gradient(145deg,#e8dfc8,#d0c4a0)', text:'#3a3020' },
+  { bg:'linear-gradient(145deg,#d8d1e8,#b8acd0)', text:'#2a2040' },
+  { bg:'linear-gradient(145deg,#cfe4e0,#a8ccc8)', text:'#1a3030' },
+  { bg:'linear-gradient(145deg,#e4d8cc,#c8b0a0)', text:'#3a2818' },
+  { bg:'linear-gradient(145deg,#d4e0d4,#b0c8b0)', text:'#1e3020' },
+]
+function coverPalette(id) {
+  let h = 0; for (let i=0;i<id.length;i++) h=(h*31+id.charCodeAt(i))|0
+  return COVER_PALETTES[Math.abs(h)%COVER_PALETTES.length]
+}
+
+// ─── Home Screen ──────────────────────────────────────────────────────────────
+function HomeScreen({ t, library, notes, book, homeTab, setHomeTab,
+  onLoadBook, onUpload, onSettings, onDeleteBook, readPos, chIdx }) {
+  const w = useWidth()
+  const isMob = w < 768
+  const pal = book ? coverPalette(book.id) : null
+  const totalCh = book?.chapters?.length || 0
+  const pct = totalCh > 1 ? Math.round((readPos.chIdx||0)/(totalCh-1)*100) : 0
+
+  const F = FONTS.lora
+
+  return (
+    <div style={{
+      height:'100%', overflowY:'auto',
+      background:t.bg,
+      paddingBottom:'calc(80px + env(safe-area-inset-bottom))',
+    }}>
+      <div style={{maxWidth:520,margin:'0 auto',padding:isMob?'0 22px':'0 32px'}}>
+
+        {/* ── Header ── */}
+        <div style={{
+          display:'flex',justifyContent:'space-between',alignItems:'center',
+          paddingTop:'calc(52px + env(safe-area-inset-top))',
+          paddingBottom:'28px',
+        }}>
+          <div>
+            <div style={{fontSize:26,fontWeight:700,fontFamily:F,color:t.text,letterSpacing:'-0.02em'}}>
+              奇阅魔方
+            </div>
+            <div style={{fontSize:12,color:t.muted,marginTop:3,letterSpacing:.5}}>
+              AI 阅读助手
+            </div>
+          </div>
+          <button onClick={onSettings} style={{
+            width:40,height:40,borderRadius:'50%',background:t.hover,border:'none',
+            display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',
+          }}><Ic name='settings' size={18} color={t.muted}/></button>
+        </div>
+
+        {/* ── Continue Reading card ── */}
+        {book && (
+          <div style={{marginBottom:36}}>
+            <div style={{fontSize:11,fontWeight:600,color:t.muted,letterSpacing:1.5,
+              textTransform:'uppercase',marginBottom:14}}>正在阅读</div>
+            <div onClick={()=>onLoadBook(book)} style={{
+              background:t.card,borderRadius:20,padding:20,
+              display:'flex',gap:18,cursor:'pointer',
+              boxShadow:'0 8px 28px rgba(0,0,0,0.07)',
+              transition:'transform .18s',
+            }}>
+              {/* Mini cover */}
+              <div style={{
+                width:72,height:100,borderRadius:10,flexShrink:0,
+                background:pal.bg,
+                boxShadow:'3px 4px 14px rgba(0,0,0,0.18)',
+                display:'flex',flexDirection:'column',alignItems:'center',
+                justifyContent:'center',padding:'10px 8px',textAlign:'center',
+              }}>
+                <span style={{fontSize:12,fontWeight:700,fontFamily:F,color:pal.text,
+                  lineHeight:1.3,display:'-webkit-box',WebkitLineClamp:3,
+                  WebkitBoxOrient:'vertical',overflow:'hidden'}}>
+                  {book.title}
+                </span>
+              </div>
+              {/* Info */}
+              <div style={{flex:1,display:'flex',flexDirection:'column',justifyContent:'center',minWidth:0}}>
+                <div style={{fontSize:17,fontWeight:700,fontFamily:F,color:t.text,
+                  marginBottom:4,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
+                  {book.title}
+                </div>
+                <div style={{fontSize:12,color:t.muted,marginBottom:16}}>
+                  {book.author}
+                </div>
+                <div style={{height:3,background:t.hover,borderRadius:2,overflow:'hidden',marginBottom:8}}>
+                  <div style={{height:'100%',background:t.accent,
+                    width:`${pct}%`,borderRadius:2,transition:'width .3s'}}/>
+                </div>
+                <div style={{display:'flex',justifyContent:'space-between',fontSize:11,color:t.muted}}>
+                  <span>第 {(readPos.chIdx||0)+1} 章 / 共 {totalCh} 章</span>
+                  <span style={{color:t.accent,fontWeight:600}}>{pct}%</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Tab bar ── */}
+        <div style={{display:'flex',gap:4,marginBottom:22,
+          background:t.hover,borderRadius:14,padding:4}}>
+          {[['library','书库'],['notes','笔记']].map(([id,label])=>(
+            <button key={id} onClick={()=>setHomeTab(id)} style={{
+              flex:1,height:36,border:'none',borderRadius:10,cursor:'pointer',
+              fontFamily:'inherit',fontSize:13,fontWeight:homeTab===id?600:400,
+              background:homeTab===id ? t.card : 'none',
+              color:homeTab===id ? t.text : t.muted,
+              boxShadow:homeTab===id?'0 1px 4px rgba(0,0,0,0.08)':'none',
+              transition:'all .18s',
+            }}>{label}</button>
+          ))}
+        </div>
+
+        {/* ── Library tab ── */}
+        {homeTab==='library' && (
+          <div style={{
+            display:'grid',
+            gridTemplateColumns:'repeat(3,1fr)',
+            gap:'24px 14px',
+          }}>
+            {/* Import button as first "book" */}
+            <div onClick={onUpload} style={{cursor:'pointer',display:'flex',flexDirection:'column',gap:9}}>
+              <div style={{
+                aspectRatio:'2/3',borderRadius:14,
+                border:`2px dashed ${t.muted}40`,
+                display:'flex',alignItems:'center',justifyContent:'center',
+                background:'none',transition:'background .18s',
+              }}>
+                <svg width={28} height={28} viewBox="0 0 24 24" fill="none"
+                  stroke={t.muted} strokeWidth={1.4} strokeLinecap="round">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+              </div>
+              <div style={{fontSize:12,color:t.muted,textAlign:'center',fontWeight:500}}>
+                导入
+              </div>
+            </div>
+
+            {/* Book grid */}
+            {library.map(b => {
+              const p = coverPalette(b.id)
+              const pos = JSON.parse(localStorage.getItem(READ_POS_KEY)||'{}')
+              const bPct = b.id===book?.id ? pct :
+                (pos.bookId===b.id && b.totalCh>1 ? Math.round((pos.chIdx||0)/(b.totalCh-1)*100) : 0)
+              return (
+                <div key={b.id} style={{display:'flex',flexDirection:'column',gap:9}}>
+                  <div onClick={()=>onLoadBook(b)} style={{
+                    aspectRatio:'2/3',borderRadius:14,
+                    background:p.bg,
+                    boxShadow:'0 6px 20px rgba(0,0,0,0.12)',
+                    display:'flex',flexDirection:'column',alignItems:'center',
+                    justifyContent:'center',padding:'12px 10px',textAlign:'center',
+                    cursor:'pointer',position:'relative',overflow:'hidden',
+                    transition:'transform .18s',
+                  }}>
+                    <span style={{fontSize:13,fontWeight:700,fontFamily:F,color:p.text,
+                      lineHeight:1.35,display:'-webkit-box',WebkitLineClamp:4,
+                      WebkitBoxOrient:'vertical',overflow:'hidden',marginBottom:6}}>
+                      {b.title}
+                    </span>
+                    <span style={{fontSize:9,color:p.text,opacity:.65,
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                      maxWidth:'90%'}}>{b.author}</span>
+                    {/* Reading progress stripe at bottom */}
+                    {bPct>0 && (
+                      <div style={{position:'absolute',bottom:0,left:0,right:0,height:3,
+                        background:'rgba(0,0,0,0.15)'}}>
+                        <div style={{height:'100%',width:`${bPct}%`,
+                          background:'rgba(0,0,0,0.35)'}}/>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{padding:'0 2px'}}>
+                    <div style={{fontSize:12,fontWeight:600,color:t.text,
+                      overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                      marginBottom:2}}>{b.title}</div>
+                    <div style={{fontSize:10,color:t.muted}}>
+                      {bPct>0 ? `已读 ${bPct}%` : '未读'}
+                    </div>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        )}
+
+        {/* ── Notes tab ── */}
+        {homeTab==='notes' && (
+          <div>
+            {notes.length===0
+              ? <div style={{textAlign:'center',paddingTop:60,color:t.muted}}>
+                  <Ic name='bookmark' size={36} color={t.muted+'60'}/>
+                  <div style={{marginTop:12,fontSize:14}}>还没有笔记</div>
+                  <div style={{fontSize:12,marginTop:6,opacity:.6}}>
+                    阅读时选中文字可加入笔记
+                  </div>
+                </div>
+              : notes.map(n=>(
+                <div key={n.id} style={{
+                  background:t.card,borderRadius:16,padding:'16px 18px',
+                  marginBottom:12,boxShadow:'0 4px 14px rgba(0,0,0,0.05)',
+                }}>
+                  <div style={{fontSize:13,lineHeight:1.7,color:t.text,marginBottom:n.thought?10:0,
+                    fontFamily:F}}>
+                    「{n.text}」
+                  </div>
+                  {n.thought && (
+                    <div style={{fontSize:12,color:t.accent,background:t.accent+'14',
+                      borderRadius:9,padding:'7px 11px',lineHeight:1.6}}>
+                      {n.thought}
+                    </div>
+                  )}
+                  <div style={{fontSize:10,color:t.muted,marginTop:10,display:'flex',
+                    gap:6,alignItems:'center'}}>
+                    <span>{n.date}</span>
+                    <span>·</span>
+                    <span style={{overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',
+                      maxWidth:160}}>{n.book||'未知书籍'}</span>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        )}
+
+      </div>
+    </div>
+  )
+}
+
+// ─── Welcome screen (legacy fallback) ─────────────────────────────────────────
 function Welcome({ t, onUpload }) {
   const w = useWidth()
   const m = w < 768
